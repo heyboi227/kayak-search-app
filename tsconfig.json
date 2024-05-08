@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+      "target": "es6",
+      "module": "commonjs",
+      "sourceMap": true,  // Enable source map support
+      "outDir": "./dist"  // Output directory for compiled files
+    },
+    "exclude": ["node_modules"]
+  }
+  

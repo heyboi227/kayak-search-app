@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "type": "node",
+        "request": "launch",
+        "name": "Launch Program",
+        "skipFiles": ["<node_internals>/**"],
+        "program": "${workspaceFolder}/openTabs.ts",
+        "preLaunchTask": "tsc: build - tsconfig.json",  // Compiles TS before launch
+        "outFiles": ["${workspaceFolder}/dist/**/*.js"],  // Location of compiled JS files
+        "sourceMaps": true
+      }
+    ]
+  }
+  
