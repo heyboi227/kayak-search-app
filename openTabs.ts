@@ -1,146 +1,10 @@
 import puppeteer, { Browser, Page } from "puppeteer-core";
-import * as fs from "fs";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { userAgents } from "./userAgents";
+import prepareCodes from "./codesHelper";
 
-const airportCodes: string[] = [
-  "DOH",
-  "DUB",
-  "AMM",
-  "LUN",
-  "HRE",
-  "CPT",
-  "NBO",
-  "PHL",
-  "SIN",
-  "CMN",
-  "DEL",
-  "SZX",
-  "ABJ",
-  "MAD",
-  "BOG",
-  "PER",
-  "SCL",
-  "CNS",
-  "CUN",
-  "ADD",
-  "GBE",
-  "WAW",
-  "IPC",
-  "PNR",
-  "CGP",
-  "LFW",
-  "CAN",
-  "LHE",
-  "BRU",
-  "PUJ",
-  "LAD",
-  "MPM",
-  "ABV",
-  "ISB",
-  "SYD",
-  "OKA",
-  "AYT",
-  "BCN",
-  "NIM",
-  "YVR",
-  "FRA",
-  "BHX",
-  "NCL",
-  "AMS",
-  "CPH",
-  "OSL",
-  "DLA",
-  "JRO",
-  "EBB",
-  "NCE",
-  "VCE",
-  "PRG",
-  "JED",
-  "CRK",
-  "MNL",
-  "DVO",
-  "GYE",
-  "VVI",
-  "GYD",
-  "HKT",
-  "SGN",
-  "BWN",
-  "KNO",
-  "XMN",
-  "NKG",
-  "LOS",
-  "DUS",
-  "MUC",
-  "HEL",
-  "MAN",
-  "BOS",
-  "DEN",
-  "ATH",
-  "BUD",
-  "VIE",
-  "GDL",
-  "MTY",
-  "PPT",
-  "AKL",
-  "BAH",
-  "DMM",
-  "AUH",
-  "MCT",
-  "COR",
-  "ASU",
-  "LIM",
-  "CCS",
-  "TAS",
-  "BOM",
-  "DAC",
-  "HKG",
-  "BLR",
-  "HYD",
-  "HAN",
-  "DPS",
-  "CSX",
-  "CKG",
-  "URC",
-  "MAA",
-];
-
-const airportCities: string[] = [
-  "IST",
-  "TPE",
-  "MIL",
-  "MEL",
-  "DXB",
-  "ROM",
-  "WAS",
-  "TYO",
-  "NYC",
-  "MDE",
-  "SHA",
-  "MEX",
-  "OSA",
-  "PAR",
-  "MIA",
-  "SEA",
-  "BKK",
-  "SFO",
-  "YTO",
-  "LON",
-  "JNB",
-  "DFW",
-  "LAX",
-  "CHI",
-  "SEL",
-  "SAO",
-  "JKT",
-  "BJS",
-  "BER",
-  "HOU",
-  "NGO",
-  "BUE",
-  "KUL",
-];
+const { airportCodes, airportCities } = prepareCodes();
 
 const saturday = new Date("2024-05-11");
 let saturdayIso = saturday.toISOString().substring(0, 10);
@@ -225,7 +89,7 @@ function processAirports() {
     if (slicedCodes.length === 0) break;
 
     const codesString = slicedCodes.join(",");
-    const link = generateLink(codesString, "787", true);
+    const link = generateLink(codesString, "A350", true);
     urlsToOpen.push(link);
 
     count++;
@@ -251,7 +115,7 @@ function processCities() {
     i < airportCities.length && count < 15;
     i++
   ) {
-    const link = generateLink(airportCities[i], "787", false);
+    const link = generateLink(airportCities[i], "A350", false);
     urlsToOpen.push(link);
 
     count++;
@@ -298,8 +162,7 @@ function generateLink(
   areSameAirports: boolean
 ) {
   const sameAirportsParam = areSameAirports ? "sameair=sameair;" : "";
-  const airlinesToOmmit = destination.includes("BER") ? "LH,OS,TK" : "LH,OS";
-  return `https://www.kayak.ie/flights/BEG-${destination}/${saturdayIso}-flexible-1day/${saturdayIso}-flexible-1day?sort=price_a&fs=airlines=-${airlinesToOmmit};eqmodel=~${aircraftModel};${sameAirportsParam}virtualinterline=-virtualinterline;baditin=baditin;triplength=-1`;
+  return `https://www.kayak.ie/flights/BEG-${destination}/${saturdayIso}-flexible-1day/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~${aircraftModel};${sameAirportsParam}virtualinterline=-virtualinterline;baditin=baditin;triplength=-1`;
 }
 
 async function launchBrowser(headless: boolean) {
@@ -380,7 +243,9 @@ async function addCheapestPrices(browser: Browser) {
           (el) => el.innerHTML
         );
       } catch (secondError) {
-        console.log("Second selector also failed. No price found.");
+        console.log(
+          "Second selector also failed. No price found. Moving on..."
+        );
       }
     }
 
@@ -388,25 +253,20 @@ async function addCheapestPrices(browser: Browser) {
   }
 
   for (const page of await browser.pages()) {
-    if (
-      (await page.$(
-        "#listWrapper > div > div:nth-child(2) > div > div > div.c8MCw-header-text"
-      )) !== null
-    ) {
-      continue;
-    } else {
-      try {
-        const cheapestFlightPrice = await getCheapestFlightPrice(page);
+    try {
+      const cheapestFlightPrice = await getCheapestFlightPrice(page);
 
-        const cheapestFlightPriceObj = {
-          price: parseFloat(cheapestFlightPrice.substring(1).replace(/,/g, "")),
-          url: page.url(),
-        };
+      if (cheapestFlightPrice === null || cheapestFlightPrice === undefined)
+        continue;
 
-        cheapestFlightPrices.push(cheapestFlightPriceObj);
-      } catch (error) {
-        console.error("There has been an error.", error);
-      }
+      const cheapestFlightPriceObj = {
+        price: parseFloat(cheapestFlightPrice.substring(1).replace(/,/g, "")),
+        url: page.url(),
+      };
+
+      cheapestFlightPrices.push(cheapestFlightPriceObj);
+    } catch (error) {
+      console.error("There has been an error.", error);
     }
   }
 }
@@ -426,6 +286,7 @@ async function processPages(
       randomUserAgents[Math.floor(Math.random() * randomUserAgents.length)]
         .useragent
     );
+    console.log(`Page opened at: ${url}`);
 
     if (index === 0) {
       const pages = await browser.pages();
