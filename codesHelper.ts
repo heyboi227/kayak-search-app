@@ -1,4 +1,8 @@
-const cityCodesForMultipleAirports = {
+import puppeteer, { Browser } from "puppeteer-core";
+import { userAgents } from "./userAgents";
+import { launchBrowser, openPage } from "./prepareBrowser";
+
+export const cityCodesForMultipleAirports = {
   BJS: ["PEK", "PKX"],
   BHZ: ["CNF", "PLU"],
   BUH: ["OTP", "BBU"],
@@ -50,11 +54,94 @@ const cityCodesForMultipleAirports = {
   THR: ["IKA", "THR"],
 };
 
-const airportAndCityCodes: string[] = [
-  /* TODO: Put user selected airports here or do some magic through API */
-];
+let airportAndCityCodes: string[] = [];
 
-export default function prepareCodes() {
+function processAirport(airportString: string): string {
+  const pattern = /.+ \(([A-Z]{3} \/ [A-Z]{4})\)|.+ \(([A-Z]{4})\)/;
+
+  return airportString.replace(pattern, (_, group1, group2) => {
+    if (group1) {
+      const matches = group1.match(/^([A-Z]{3})\s/);
+      return matches ? matches[1] : "";
+    } else if (group2) {
+      return group2.slice(1);
+    }
+    return "";
+  });
+}
+
+function delay(time: number) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, time);
+  });
+}
+
+async function retrieveCodesForAircraftTypes(aircraftTypes: string[]) {
+  for (const aircraftType of aircraftTypes) {
+    const browser = await launchBrowser(true);
+
+    await obtainCodes(browser, aircraftType);
+
+    console.log("Succesfully added airports. Let's go!");
+
+    await browser.close();
+  }
+}
+
+async function obtainCodes(browser: Browser, aircraftType: string) {
+  let offset: number = 0;
+
+  try {
+    while (true) {
+      const page = await openPage(
+        browser,
+        `https://www.flightaware.com/live/aircrafttype/${aircraftType};offset=${offset}`,
+        userAgents[Math.floor(Math.random() * userAgents.length)].useragent
+      );
+
+      console.log(`Opened page at ${page.url()}`);
+      console.log("Pray that FlightAware developers will not catch you.");
+
+      const table = await page.$$("table");
+
+      if (
+        (await table[2].evaluate((table) => table.innerText)).includes(
+          "No matching flights"
+        )
+      ) {
+        break;
+      }
+      const rows = await table[2].$$(
+        "#mainBody > div.pageContainer > table:nth-child(2) > tbody > tr:nth-child(2) > td > table > tbody > tr"
+      );
+
+      for (const row of rows) {
+        const cells = await row.$$("td");
+        const originAirport = processAirport(
+          await cells[2].evaluate((cell) => cell.innerText)
+        );
+
+        const destinationAirport = processAirport(
+          await cells[3].evaluate((cell) => cell.innerText)
+        );
+
+        const regex: RegExp = /[A-Z]{3}/g;
+
+        if (originAirport.match(regex)) airportAndCityCodes.push(originAirport);
+        if (destinationAirport.match(regex))
+          airportAndCityCodes.push(destinationAirport);
+      }
+
+      await page.close();
+
+      offset += 20;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+export default async function prepareCodes() {
   const reverseMapping: { [key: string]: string } = {};
 
   for (const [supercode, codes] of Object.entries(
@@ -64,6 +151,8 @@ export default function prepareCodes() {
       reverseMapping[code] = supercode;
     }
   }
+
+  await retrieveCodesForAircraftTypes(["A359", "A35K"]);
 
   const resultArray = airportAndCityCodes.map(
     (code) => reverseMapping[code] || code
