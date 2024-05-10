@@ -54,6 +54,19 @@ export const cityCodesForMultipleAirports = {
   THR: ["IKA", "THR"],
 };
 
+const aircraftCodesForVariants = {
+  A350: ["A359", "A35K"],
+  "787": ["B788", "B789", "B78X"],
+  A220: ["BCS1", "BCS3"],
+  A320neo: ["A19N", "A20N", "A21N"],
+  "777": ["777", "B77W", "B772", "B77L", "B773"],
+  A380: ["A388"],
+  "747": ["B744", "B748", "747", "B742"],
+  "767": ["767", "B763", "B764", "B762"],
+  A330: ["A333", "A332", "A330"],
+  A330neo: ["A339"],
+};
+
 let airportAndCityCodes: string[] = [];
 
 function processAirport(airportString: string): string {
@@ -70,13 +83,10 @@ function processAirport(airportString: string): string {
   });
 }
 
-function delay(time: number) {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, time);
-  });
-}
-
 async function retrieveCodesForAircraftTypes(aircraftTypes: string[]) {
+  console.log("Let's grab these airports, shall we?");
+  console.log("Pray that the FlightAware developers will not catch us.");
+
   for (const aircraftType of aircraftTypes) {
     const browser = await launchBrowser(true);
 
@@ -100,7 +110,6 @@ async function obtainCodes(browser: Browser, aircraftType: string) {
       );
 
       console.log(`Opened page at ${page.url()}`);
-      console.log("Pray that FlightAware developers will not catch you.");
 
       const table = await page.$$("table");
 
@@ -141,29 +150,41 @@ async function obtainCodes(browser: Browser, aircraftType: string) {
   }
 }
 
-export default async function prepareCodes() {
+function reverseCodeMapping(objectMap: Object) {
   const reverseMapping: { [key: string]: string } = {};
 
-  for (const [supercode, codes] of Object.entries(
-    cityCodesForMultipleAirports
-  )) {
+  for (const [supercode, codes] of Object.entries(objectMap)) {
     for (const code of codes) {
       reverseMapping[code] = supercode;
     }
   }
 
-  await retrieveCodesForAircraftTypes(["A359", "A35K"]);
+  return reverseMapping;
+}
 
-  const resultArray = airportAndCityCodes.map(
-    (code) => reverseMapping[code] || code
+export default async function prepareCodes(aircraftTypes: string[]) {
+  await retrieveCodesForAircraftTypes(aircraftTypes);
+
+  const airportReverseMapping = reverseCodeMapping(
+    cityCodesForMultipleAirports
+  );
+  const aircraftReverseMapping = reverseCodeMapping(aircraftCodesForVariants);
+
+  const resultAirportsArray = airportAndCityCodes.map(
+    (code) => airportReverseMapping[code] || code
   );
 
-  const distinctResultArray = Array.from(new Set(resultArray));
+  const resultAircraftArray = aircraftTypes.map(
+    (code) => aircraftReverseMapping[code] || code
+  );
+
+  const distinctResultAirportsArray = Array.from(new Set(resultAirportsArray));
+  let aircraftCode: string = Array.from(new Set(resultAircraftArray))[0];
 
   const airportCodes: string[] = [];
   const airportCities: string[] = [];
 
-  for (const result of distinctResultArray) {
+  for (const result of distinctResultAirportsArray) {
     if (Object.keys(cityCodesForMultipleAirports).includes(result)) {
       airportCities.push(result);
     } else {
@@ -171,5 +192,5 @@ export default async function prepareCodes() {
     }
   }
 
-  return { airportCodes, airportCities };
+  return { airportCodes, airportCities, aircraftCode };
 }
