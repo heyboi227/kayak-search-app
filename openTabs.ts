@@ -933,7 +933,11 @@ async function main() {
                     </thead>
                     <tbody>
                         <!-- Data rows will go here -->
-                        ${generateTableRows(cheapestPricesUnderThePercentile)}
+                        ${generateTableRows(
+                          cheapestPricesUnderThePercentile.sort(
+                            (a, b) => a.price - b.price
+                          )
+                        )}
                     </tbody>
                 </table>
             </body>
