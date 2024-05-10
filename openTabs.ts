@@ -583,6 +583,8 @@ async function main() {
 
   let firstCodeIndexPerLoop: number = 0;
 
+  let nextCode: string = "";
+
   type CheapestFlightPrices = { price: number; url: string };
 
   let cheapestFlightPrices: CheapestFlightPrices[] = [];
@@ -759,28 +761,41 @@ async function main() {
     );
   }
 
+  function saveCurrentState() {
+    return {
+      index: firstCodeIndexPerLoop,
+      openAirports,
+      openCities,
+    };
+  }
+
+  function restoreState(savedState: {
+    index: number;
+    openAirports: boolean;
+    openCities: boolean;
+  }) {
+    firstCodeIndexPerLoop = savedState.index;
+    openAirports = savedState.openAirports;
+    openCities = savedState.openCities;
+  }
+
+  async function isCaptchaPage(url: string) {
+    return url.includes("security/check") || url.includes("sitecaptcha");
+  }
+
   async function handleCaptcha(browser: Browser, page: Page) {
-    const url = page.url();
+    if (await isCaptchaPage(page.url())) {
+      let savedState = saveCurrentState();
 
-    async function isCaptchaPage() {
-      return url.includes("security/check") || url.includes("sitecaptcha");
-    }
-
-    if (await isCaptchaPage()) {
-      if (url.includes("sitecaptcha")) urlIncludedSiteCaptcha = true;
+      if (page.url().includes("sitecaptcha")) urlIncludedSiteCaptcha = true;
       await notifyCaptchaNeeded();
       await waitForCaptchaSolution(page);
 
-      const firstSecurityCheckCodeForNextCycle: string = url.substring(57, 60);
+      await browser.close();
+      await launchBrowser(false);
+      restoreState(savedState);
 
-      if (url.includes("security/check")) {
-        firstCodeIndexPerLoop =
-          airportCodes.indexOf(firstSecurityCheckCodeForNextCycle) === -1
-            ? airportCities.indexOf(firstSecurityCheckCodeForNextCycle)
-            : airportCodes.indexOf(firstSecurityCheckCodeForNextCycle);
-        await browser.close();
-        beginAutomatization();
-      }
+      openTabsInEdge(urlsToOpen);
     }
   }
 
@@ -898,8 +913,9 @@ async function main() {
       await delay(Math.floor(Math.random() * 15000 + 45000));
 
       await addCheapestPrices(browser);
-      const cheapestPricesUnderThePercentile =
-        findObjectsWithCheapFlightPrices(cheapestFlightPrices);
+      const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
+        cheapestFlightPrices
+      ).sort((a, b) => a.price - b.price);
 
       if (!stillOpenAirports && !stillOpenCities) {
         openAirports = !openAirports;
@@ -933,11 +949,7 @@ async function main() {
                     </thead>
                     <tbody>
                         <!-- Data rows will go here -->
-                        ${generateTableRows(
-                          cheapestPricesUnderThePercentile.sort(
-                            (a, b) => a.price - b.price
-                          )
-                        )}
+                        ${generateTableRows(cheapestPricesUnderThePercentile)}
                     </tbody>
                 </table>
             </body>
