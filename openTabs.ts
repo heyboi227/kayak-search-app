@@ -1,4 +1,4 @@
-import puppeteer, { Browser, Page } from "puppeteer-core";
+import { Browser, Page } from "puppeteer-core";
 import prepareCodes from "./codesHelper";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";

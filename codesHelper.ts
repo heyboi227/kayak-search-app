@@ -1,4 +1,4 @@
-import puppeteer, { Browser } from "puppeteer-core";
+import { Browser } from "puppeteer-core";
 import { userAgents } from "./userAgents";
 import { launchBrowser, openPage } from "./prepareBrowser";
 
