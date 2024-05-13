@@ -1,8 +1,9 @@
-import { Browser } from "puppeteer-core";
+import { Browser, ElementHandle, Page } from "puppeteer-core";
 import { userAgents } from "./userAgents";
-import { launchBrowser, openPage } from "./prepareBrowser";
+import { delay, launchBrowser, openPage } from "./prepareBrowser";
+import { saveData } from "./helpers";
 
-export const cityCodesForMultipleAirports = {
+const cityCodesForMultipleAirports = {
   BJS: ["PEK", "PKX"],
   BHZ: ["CNF", "PLU"],
   BUH: ["OTP", "BBU"],
@@ -54,99 +55,184 @@ export const cityCodesForMultipleAirports = {
   THR: ["IKA", "THR"],
 };
 
-const aircraftCodesForVariants = {
-  A350: ["A359", "A35K"],
-  "787": ["B788", "B789", "B78X"],
-  A220: ["BCS1", "BCS3"],
-  A320neo: ["A19N", "A20N", "A21N"],
-  "777": ["777", "B77W", "B772", "B77L", "B773"],
-  A380: ["A388"],
-  "747": ["B744", "B748", "747", "B742"],
-  "767": ["767", "B763", "B764", "B762"],
-  A330: ["A333", "A332", "A330"],
-  A330neo: ["A339"],
-};
+let airportAndCityCodes: Set<string> = new Set<string>();
 
-let airportAndCityCodes: string[] = [];
-
-function processAirport(airportString: string): string {
-  const pattern = /.+ \(([A-Z]{3} \/ [A-Z]{4})\)|.+ \(([A-Z]{4})\)/;
-
-  return airportString.replace(pattern, (_, group1, group2) => {
-    if (group1) {
-      const matches = group1.match(/^([A-Z]{3})\s/);
-      return matches ? matches[1] : "";
-    } else if (group2) {
-      return group2.slice(1);
-    }
-    return "";
-  });
-}
+let startIndex: number = 0;
 
 async function retrieveCodesForAircraftTypes(aircraftTypes: string[]) {
   console.log("Let's grab these airports, shall we?");
-  console.log("Pray that the FlightAware developers will not catch us.");
+  console.log("Pray that the FlightRadar24 developers will not catch us.");
+  console.log(
+    "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie."
+  );
 
   for (const aircraftType of aircraftTypes) {
     const browser = await launchBrowser(true);
 
-    await obtainCodes(browser, aircraftType);
+    const pages = await browser.pages();
+    if (pages.length > 1) await pages[0].close();
 
-    console.log("Succesfully added airports. Let's go!");
+    await obtainCodes(browser, aircraftType);
 
     await browser.close();
   }
+
+  console.log(
+    `Succesfully added ${airportAndCityCodes.size} airports. Let's go!`
+  );
 }
 
+function saveCurrentState(index: number) {
+  return {
+    index,
+  };
+}
+
+function restoreState(savedState: { index: number }) {
+  startIndex = savedState.index;
+}
+
+async function acceptCookiesAfterVerification(page: Page) {
+  try {
+    await page.click("#onetrust-accept-btn-handler");
+    console.log("Accepted all cookies, unfortunately.");
+    await delay(1500);
+  } catch {}
+}
+
+async function processLinks(
+  browser: Browser,
+  links: string[],
+  startIndex: number = 0
+) {
+  let index = startIndex;
+
+  for (const link of links.slice(startIndex > 0 ? ++startIndex : startIndex)) {
+    const detailPage = await openPage(browser, link, getRandomUserAgent());
+
+    await delay(Math.floor(Math.random() * 2000 + 1000));
+
+    if (
+      (await detailPage.$eval("html", (page) => page.innerHTML)).includes(
+        "Verifying"
+      )
+    ) {
+      let savedState = saveCurrentState(index);
+
+      await delay(Math.floor(Math.random() * 10000 + 15000));
+
+      acceptCookiesAfterVerification(detailPage);
+
+      await browser.close();
+      await delay(Math.floor(Math.random() * 5000 + 10000));
+      browser = await launchBrowser(true);
+
+      restoreState(savedState);
+      await processLinks(browser, links, savedState.index);
+    } else {
+      await delay(1500);
+      acceptCookiesAfterVerification(detailPage);
+    }
+
+    index++;
+
+    try {
+      const detailRows = await extractAirportCodes(detailPage);
+      detailRows.forEach(processAirportCode);
+    } catch (error) {
+      console.error("Error processing link", link, error);
+    } finally {
+      await detailPage.close();
+    }
+  }
+}
+
+async function extractAirportCodes(page: Page) {
+  const detailTable = await page.$("#tbl-datatable");
+  if (!detailTable) return [];
+
+  const detailRows = await detailTable.$$("tr");
+  const airportCodes = [];
+
+  for (const detailRow of detailRows) {
+    const cells = await Promise.all([
+      detailRow.$("td:nth-child(4)"),
+      detailRow.$("td:nth-child(5)"),
+    ]).catch(() => []);
+    const [originCell, destinationCell] = cells;
+
+    if (originCell && destinationCell) {
+      const originCode = (await getCellText(originCell)).slice(-4, -1);
+      const destinationCode = (await getCellText(destinationCell)).slice(
+        -4,
+        -1
+      );
+      if (originCode && destinationCode) {
+        airportCodes.push(originCode, destinationCode);
+      }
+    }
+  }
+
+  return airportCodes;
+}
+
+function processAirportCode(code: string) {
+  if (!airportAndCityCodes.has(code)) {
+    console.log(`Airport code ${code} added to table.`);
+  }
+  airportAndCityCodes.add(code);
+}
+
+async function getCellText(cell: ElementHandle) {
+  return await cell.evaluate((cell) => cell.textContent.trim());
+}
+
+function getRandomUserAgent() {
+  return userAgents[Math.floor(Math.random() * userAgents.length)].useragent;
+}
+
+let cookiesAccepted: boolean = false;
+
 async function obtainCodes(browser: Browser, aircraftType: string) {
-  let offset: number = 0;
+  cookiesAccepted = false;
 
   try {
-    while (true) {
-      const page = await openPage(
-        browser,
-        `https://www.flightaware.com/live/aircrafttype/${aircraftType};offset=${offset}`,
-        userAgents[Math.floor(Math.random() * userAgents.length)].useragent
-      );
+    const page = await openPage(
+      browser,
+      `https://www.flightradar24.com/data/aircraft/${aircraftType}`,
+      getRandomUserAgent()
+    );
 
-      console.log(`Opened page at ${page.url()}`);
+    console.log(`Opened page at ${page.url()}`);
 
-      const table = await page.$$("table");
-
-      if (
-        (await table[2].evaluate((table) => table.innerText)).includes(
-          "No matching flights"
-        )
-      ) {
-        break;
-      }
-      const rows = await table[2].$$(
-        "#mainBody > div.pageContainer > table:nth-child(2) > tbody > tr:nth-child(2) > td > table > tbody > tr"
-      );
-
-      for (const row of rows) {
-        const cells = await row.$$("td");
-        const originAirport = processAirport(
-          await cells[2].evaluate((cell) => cell.innerText)
-        );
-
-        const destinationAirport = processAirport(
-          await cells[3].evaluate((cell) => cell.innerText)
-        );
-
-        const regex: RegExp = /[A-Z]{3}/g;
-
-        if (originAirport.match(regex)) airportAndCityCodes.push(originAirport);
-        if (destinationAirport.match(regex))
-          airportAndCityCodes.push(destinationAirport);
-      }
-
-      await page.close();
-
-      offset += 20;
+    if (!cookiesAccepted) {
+      await page.click("#onetrust-accept-btn-handler");
+      console.log("Accepted all cookies, unfortunately.");
+      cookiesAccepted = true;
     }
+
+    const table = await page.$("#cnt-list-aircraft > table");
+    if (!table) {
+      console.error("Table not found");
+      return;
+    }
+
+    const rows = await table.$$("tr");
+    const links = [];
+
+    for (const row of rows) {
+      const linkElement = await row.$("td:nth-child(2) > a");
+      if (linkElement) {
+        const link = await linkElement.evaluate((a) => a.href);
+        links.push(link);
+      }
+    }
+
+    console.log(`Found ${links.length} aircraft to process.`);
+
+    await processLinks(browser, links);
   } catch (error) {
-    console.error(error);
+    console.error("An error occurred in obtainCodes:", error);
   }
 }
 
@@ -162,35 +248,38 @@ function reverseCodeMapping(objectMap: Object) {
   return reverseMapping;
 }
 
-export default async function prepareCodes(aircraftTypes: string[]) {
+async function prepareCodes(aircraftTypes: string[]) {
   await retrieveCodesForAircraftTypes(aircraftTypes);
 
   const airportReverseMapping = reverseCodeMapping(
     cityCodesForMultipleAirports
   );
-  const aircraftReverseMapping = reverseCodeMapping(aircraftCodesForVariants);
 
-  const resultAirportsArray = airportAndCityCodes.map(
+  const airportAndCityCodesArray = Array.from(airportAndCityCodes);
+
+  const resultAirportsArray = airportAndCityCodesArray.map(
     (code) => airportReverseMapping[code] || code
   );
 
-  const resultAircraftArray = aircraftTypes.map(
-    (code) => aircraftReverseMapping[code] || code
-  );
-
-  const distinctResultAirportsArray = Array.from(new Set(resultAirportsArray));
-  let aircraftCode: string = Array.from(new Set(resultAircraftArray))[0];
-
   const airportCodes: string[] = [];
-  const airportCities: string[] = [];
+  const airportCities: Set<string> = new Set<string>();
 
-  for (const result of distinctResultAirportsArray) {
+  for (const result of resultAirportsArray) {
     if (Object.keys(cityCodesForMultipleAirports).includes(result)) {
-      airportCities.push(result);
+      airportCities.add(result);
     } else {
       airportCodes.push(result);
     }
   }
 
-  return { airportCodes, airportCities, aircraftCode };
+  const uniqueAirportCitiesArray = Array.from(airportCities);
+
+  saveData(airportCodes, "codes.json").then(() =>
+    console.log("Airport codes succesfully saved!")
+  );
+  saveData(uniqueAirportCitiesArray, "cities.json").then(() =>
+    console.log("Airport cities succesfully saved!")
+  );
 }
+
+prepareCodes(["B788", "B789", "B78X"]);

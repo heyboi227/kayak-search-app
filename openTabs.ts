@@ -1,16 +1,18 @@
 import { Browser, Page } from "puppeteer-core";
-import prepareCodes from "./codesHelper";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { userAgents } from "./userAgents";
-import { launchBrowser, openPage } from "./prepareBrowser";
+import { delay, launchBrowser, openPage } from "./prepareBrowser";
+import { loadData } from "./helpers";
 
 async function main() {
-  const { airportCodes, airportCities, aircraftCode } = await prepareCodes([
-    "B788",
-    "B789",
-    "B78X",
-  ]);
+  const airportCodes = await loadData("codes.json");
+  console.log("Successfully loaded airport codes!");
+
+  const airportCities = await loadData("cities.json");
+  console.log("Successfully loaded airport cities!");
+
+  const aircraftCode = "787";
 
   const restrictedAirportCodes: string[] = [
     "AAO",
@@ -203,7 +205,6 @@ async function main() {
     "IHR",
     "IIL",
     "IJK",
-    "IKA",
     "IKS",
     "IKT",
     "IMO",
@@ -469,7 +470,6 @@ async function main() {
     "TGK",
     "TGP",
     "THL",
-    "THR",
     "THX",
     "TIO",
     "TIP",
@@ -566,36 +566,20 @@ async function main() {
     "ZZO",
   ];
 
-  const restrictedAirportCities = ["MOW", "IEV"];
+  const restrictedAirportCities = ["MOW", "IEV", "THR"];
 
   const originAirportsAndCities: string[] = ["BEG", "KVO", "TSR"];
 
-  const saturday = new Date("2024-05-18");
+  const saturday = new Date("2024-06-22");
   let saturdayIso = saturday.toISOString().substring(0, 10);
-
-  let openAirports: boolean = true;
-  let openCities: boolean = false;
-
-  let stillOpenAirports: boolean = false;
-  let stillOpenCities: boolean = false;
 
   let urlsToOpen: string[] = [];
 
   let firstCodeIndexPerLoop: number = 0;
 
-  let nextCode: string = "";
-
   type CheapestFlightPrices = { price: number; url: string };
 
   let cheapestFlightPrices: CheapestFlightPrices[] = [];
-
-  let urlIncludedSiteCaptcha: boolean = false;
-
-  function delay(time: number) {
-    return new Promise(function (resolve) {
-      setTimeout(resolve, time);
-    });
-  }
 
   async function sendMail(to: string, subject: string, message: string) {
     const transporter = nodemailer.createTransport({
@@ -626,25 +610,19 @@ async function main() {
     }
   }
 
-  async function prepareUrls() {
+  async function prepareUrls(startIndex: number = 0) {
+    urlsToOpen.length = 0;
+    firstCodeIndexPerLoop = startIndex;
+
     try {
-      if (openAirports) {
-        await processAirports();
-      } else {
-        await processCities();
-      }
+      await processAirports();
+      await processCities();
     } catch (error) {
       console.error("There has been an error.", error);
     }
   }
 
   async function processAirports() {
-    urlsToOpen.length = 0;
-
-    let count: number = 0;
-
-    stillOpenAirports = true;
-
     const filteredAirportCodes = airportCodes.filter(
       (airportCode) =>
         !originAirportsAndCities.includes(airportCode) &&
@@ -653,7 +631,7 @@ async function main() {
 
     for (
       let i = firstCodeIndexPerLoop;
-      i < filteredAirportCodes.length && count < 15;
+      i < filteredAirportCodes.length;
       i += 3
     ) {
       const slicedCodes = filteredAirportCodes.slice(i, i + 3);
@@ -663,47 +641,21 @@ async function main() {
       const codesString = slicedCodes.join(",");
       const link = generateLink(codesString, aircraftCode, true);
       urlsToOpen.push(link);
-
-      count++;
-
-      firstCodeIndexPerLoop = i + 3;
     }
 
-    if (count < 15) {
-      firstCodeIndexPerLoop = 0;
-      stillOpenAirports = false;
-    }
+    firstCodeIndexPerLoop = filteredAirportCodes.length;
   }
 
   async function processCities() {
-    urlsToOpen.length = 0;
-
-    let count: number = 0;
-
-    stillOpenCities = true;
-
     const filteredAirportCities = airportCities.filter(
       (airportCity) =>
         !originAirportsAndCities.includes(airportCity) &&
         !restrictedAirportCities.includes(airportCity)
     );
 
-    for (
-      let i = firstCodeIndexPerLoop;
-      i < filteredAirportCities.length && count < 15;
-      i++
-    ) {
-      const link = generateLink(filteredAirportCities[i], aircraftCode, false);
+    for (const airportCity of filteredAirportCities) {
+      const link = generateLink(airportCity, aircraftCode, false);
       urlsToOpen.push(link);
-
-      count++;
-    }
-
-    firstCodeIndexPerLoop += 15;
-
-    if (count < 15) {
-      firstCodeIndexPerLoop = 0;
-      stillOpenCities = false;
     }
   }
 
@@ -761,125 +713,83 @@ async function main() {
     );
   }
 
-  function saveCurrentState() {
-    return {
-      index: firstCodeIndexPerLoop,
-      openAirports,
-      openCities,
-    };
-  }
-
-  function restoreState(savedState: {
-    index: number;
-    openAirports: boolean;
-    openCities: boolean;
-  }) {
-    firstCodeIndexPerLoop = savedState.index;
-    openAirports = savedState.openAirports;
-    openCities = savedState.openCities;
-  }
-
   async function isCaptchaPage(url: string) {
     return url.includes("security/check") || url.includes("sitecaptcha");
   }
 
-  async function handleCaptcha(browser: Browser, page: Page) {
+  async function handleCaptcha(browser: Browser, page: Page, urlIndex: number) {
     if (await isCaptchaPage(page.url())) {
-      let savedState = saveCurrentState();
-
-      if (page.url().includes("sitecaptcha")) urlIncludedSiteCaptcha = true;
-      await notifyCaptchaNeeded();
-      await waitForCaptchaSolution(page);
+      await addCheapestPrices(browser, true);
 
       await browser.close();
-      await launchBrowser(false);
-      restoreState(savedState);
+      browser = await launchBrowser(false);
 
-      openTabsInEdge(urlsToOpen);
+      const newPage = await openPage(
+        browser,
+        page.url(),
+        userAgents[Math.floor(Math.random() * userAgents.length)].useragent
+      );
+
+      await notifyCaptchaNeeded();
+      await waitForCaptchaSolution(newPage);
+
+      await browser.close();
+      beginAutomatization(urlIndex);
     }
   }
 
-  async function addCheapestPrices(browser: Browser) {
-    async function getCheapestFlightPrice(page: Page) {
-      let cheapestFlightPrice: string = null;
+  async function getCheapestFlightPrice(page: Page) {
+    let cheapestFlightPrice: string = null;
 
+    try {
+      cheapestFlightPrice = await page.$eval(
+        "div.Hv20 > div:nth-child(1) > div > div.Hv20-value > div > span:nth-child(1)",
+        (el) => el.innerHTML
+      );
+    } catch (error) {
+      console.log("First selector failed, trying second selector...");
       try {
         cheapestFlightPrice = await page.$eval(
-          "#listWrapper > div > div.Hv20 > div:nth-child(1) > div > div.Hv20-value > div > span:nth-child(1)",
+          "div.Hv20-option.Hv20-mod-state-active > div > div.Hv20-value > div > span:nth-child(1)",
           (el) => el.innerHTML
         );
-      } catch (error) {
-        console.log("First selector failed, trying second selector...");
-        try {
-          cheapestFlightPrice = await page.$eval(
-            "div > div.Hv20-option.Hv20-mod-state-active > div > div.Hv20-value > div > span:nth-child(1)",
-            (el) => el.innerHTML
-          );
-        } catch (secondError) {
-          console.log(
-            "Second selector also failed. No price found. Moving on..."
-          );
-        }
+      } catch (secondError) {
+        console.log(
+          "Second selector also failed. No price found. Moving on..."
+        );
       }
-
-      return cheapestFlightPrice;
     }
 
-    for (const page of await browser.pages()) {
-      try {
-        const cheapestFlightPrice = await getCheapestFlightPrice(page);
+    return cheapestFlightPrice;
+  }
+
+  async function addCheapestPrices(
+    browser: Browser,
+    interruptedByCaptcha: boolean
+  ) {
+    try {
+      const pages = await browser.pages();
+      for (let index = 0; index < pages.length; index++) {
+        if (interruptedByCaptcha) {
+          if (index === pages.length - 1) return;
+        }
+
+        const cheapestFlightPrice = await getCheapestFlightPrice(pages[index]);
 
         if (cheapestFlightPrice === null || cheapestFlightPrice === undefined)
           continue;
 
         const cheapestFlightPriceObj = {
           price: parseFloat(cheapestFlightPrice.substring(1).replace(/,/g, "")),
-          url: page.url(),
+          url: pages[index].url(),
         };
 
         cheapestFlightPrices.push(cheapestFlightPriceObj);
-      } catch (error) {
-        console.error("There has been an error.", error);
-      }
-    }
-  }
-
-  async function processPages(
-    browser: Browser,
-    urls: string[],
-    randomUserAgents: typeof userAgents
-  ) {
-    let index: number = 0;
-
-    for (const url of urls) {
-      if (index !== 0) await delay(Math.random() * 5000 + 2000);
-      let page = await openPage(
-        browser,
-        url,
-        randomUserAgents[Math.floor(Math.random() * randomUserAgents.length)]
-          .useragent
-      );
-      console.log(`Page opened at: ${url}`);
-
-      if (index === 0) {
-        const pages = await browser.pages();
-        if (pages.length > 0) await pages[0].close();
-        await delay(2000);
-        await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
-        console.log("Accepted all cookies, unfortunately.\n");
       }
 
-      await handleCaptcha(browser, page);
-
-      index++;
-    }
-  }
-
-  async function reloadExpiredResultsPages(browser: Browser) {
-    const pages = await browser.pages();
-    for (const page of pages) {
-      if ((await page.$eval("html", (el) => el.innerHTML)).includes("expired"))
-        await page.reload({ timeout: 0 });
+      console.log("\nAdded cheapest prices.");
+    } catch (error) {
+      console.error("There has been an error.", error);
     }
   }
 
@@ -898,80 +808,109 @@ async function main() {
       .join("");
   }
 
-  async function openTabsInEdge(urls: string[]): Promise<void> {
-    try {
-      console.log("Here we go!\n");
-      const browser = await launchBrowser(false);
+  async function openTabsInEdge(
+    urls: string[],
+    startIndex: number = 0
+  ): Promise<void> {
+    console.log("Starting batch processing of URLs.\n");
+    const batchSize = 10;
+    let batchEndIndex: number;
 
-      console.log("Opening URLs. Please wait...\n");
+    for (let i = startIndex; i < urls.length; i += batchSize) {
+      batchEndIndex = i + batchSize;
+      const currentBatch = urls.slice(i, batchEndIndex);
+      console.log(`Processing batch from index ${i} to ${batchEndIndex - 1}`);
 
-      await processPages(browser, urls, userAgents);
+      const browser = await launchBrowser(true);
+      console.log("Browser launched for current batch.\n");
 
-      console.log("Opened all URLs. Now doing some magic...");
+      for (const url of currentBatch) {
+        console.log(`Processing URL at index ${urls.indexOf(url)}: ${url}`);
+        try {
+          if (currentBatch.indexOf(url) !== 0) await delay(10000);
 
-      if (urlIncludedSiteCaptcha) await reloadExpiredResultsPages(browser);
+          const page = await openPage(
+            browser,
+            url,
+            userAgents[Math.floor(Math.random() * userAgents.length)].useragent
+          );
+          console.log(`Opened URL at: ${url}.`);
+
+          if (currentBatch.indexOf(url) === 0) {
+            await delay(2000);
+            await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
+            console.log("Accepted all cookies.\n");
+          }
+
+          await handleCaptcha(browser, page, urls.indexOf(url));
+        } catch (error) {
+          console.error(`Error processing URL ${url}:`, error);
+        }
+      }
+
+      console.log("Opened the whole batch. Obtaining prices...");
       await delay(Math.floor(Math.random() * 15000 + 45000));
-
-      await addCheapestPrices(browser);
-      const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
-        cheapestFlightPrices
-      ).sort((a, b) => a.price - b.price);
-
-      if (!stillOpenAirports && !stillOpenCities) {
-        openAirports = !openAirports;
-        openCities = !openCities;
-      }
-
-      if (!stillOpenAirports && !stillOpenCities && openAirports) {
-        console.log(
-          "I have sent you some flight prices via mail. Thank me later."
-        );
-
-        await sendMail(
-          "milosjeknic@hotmail.rs",
-          `Cheapest prices for ${new Date(saturdayIso).toLocaleDateString(
-            "sr"
-          )}`,
-          `<!DOCTYPE html>
-          <html lang="en">
-            <head>
-              <meta charset="UTF-8">
-            </head>
-            <body>
-                <p>Hey there! Here are some of the prices I could find:</p>
-                <h2>Price Overview</h2>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr style="background-color: #f2f2f2;">
-                            <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
-                            <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Data rows will go here -->
-                        ${generateTableRows(cheapestPricesUnderThePercentile)}
-                    </tbody>
-                </table>
-            </body>
-          </html>`
-        );
-
-        cheapestFlightPrices.length = 0;
-        saturday.setDate(saturday.getDate() + 7);
-        saturdayIso = saturday.toISOString().substring(0, 10);
-      }
+      await addCheapestPrices(browser, false);
 
       await browser.close();
-      beginAutomatization();
-    } catch (error) {
-      console.error("Failed to open tabs:", error);
+      console.log("Browser closed for current batch.\n");
+
+      await delay(Math.floor(Math.random() * 10000 + 25000));
+
+      if (batchEndIndex >= urls.length) {
+        console.log(
+          "All batches processed. Sending email with cheapest prices."
+        );
+        await sendCheapestPricesEmail();
+        return;
+      }
     }
+    beginAutomatization();
   }
 
-  function beginAutomatization() {
-    urlIncludedSiteCaptcha = false;
-    prepareUrls();
-    openTabsInEdge(urlsToOpen);
+  async function sendCheapestPricesEmail() {
+    const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
+      cheapestFlightPrices
+    ).sort((a, b) => a.price - b.price);
+
+    console.log("I have sent you some flight prices via mail. Thank me later.");
+
+    await sendMail(
+      "milosjeknic@hotmail.rs",
+      `Cheapest prices for ${new Date(saturdayIso).toLocaleDateString("sr")}`,
+      `<!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+          </head>
+          <body>
+              <p>Hey there! Here are some of the prices I could find:</p>
+              <h2>Price Overview</h2>
+              <table style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                      <tr style="background-color: #f2f2f2;">
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      <!-- Data rows will go here -->
+                      ${generateTableRows(cheapestPricesUnderThePercentile)}
+                  </tbody>
+              </table>
+          </body>
+        </html>`
+    );
+
+    cheapestFlightPrices.length = 0;
+    saturday.setDate(saturday.getDate() + 7);
+    saturdayIso = saturday.toISOString().substring(0, 10);
+  }
+
+  function beginAutomatization(startIndex: number = 0) {
+    prepareUrls().then(() => {
+      openTabsInEdge(urlsToOpen, startIndex);
+    });
   }
 
   beginAutomatization();
