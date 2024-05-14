@@ -855,7 +855,7 @@ async function main() {
       await browser.close();
       console.log("Browser closed for current batch.\n");
 
-      await delay(Math.floor(Math.random() * 10000 + 25000));
+      await delay(Math.floor(Math.random() * 30000 + 60000));
 
       if (batchEndIndex >= urls.length) {
         console.log(
