@@ -1,11 +1,13 @@
-import puppeteer, { Browser } from "puppeteer-core";
+import { Browser } from "puppeteer-core";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+puppeteer.use(StealthPlugin());
 
 export async function launchBrowser(headless: boolean) {
   return puppeteer.launch({
     channel: "chrome",
     headless,
-    defaultViewport: null,
-    args: ["--start-maximized"],
     protocolTimeout: 0,
   });
 }
@@ -17,7 +19,11 @@ export async function openPage(
 ) {
   const page = await browser.newPage();
   await page.setUserAgent(userAgent);
-  await page.goto(url, { timeout: 0 });
+  await page.setViewport({
+    width: 1280 + Math.floor(Math.random() * 100),
+    height: 800 + Math.floor(Math.random() * 100),
+  });
+  await page.goto(url, { waitUntil: "networkidle2" });
   return page;
 }
 

@@ -785,29 +785,22 @@ async function main() {
     try {
       const pages = await browser.pages();
 
-      for (let index = 0; index < pages.length; index++) {
-        if (interruptedByCaptcha) {
-          if ((index === 0 || index === pages.length - 1) && pages.length > 2)
-            return;
+      for (const [index, page] of pages.entries()) {
+        if (
+          shouldInterruptByCaptcha(interruptedByCaptcha, index, pages.length)
+        ) {
+          return;
         }
 
-        const cheapestFlightPrice = await getCheapestFlightPrice(pages[index]);
-
+        const cheapestFlightPrice = await getCheapestFlightPrice(page);
         if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-          const cheapestFlightPriceObj = {
-            date: saturdayIso,
-            price: parseFloat(
-              cheapestFlightPrice.substring(1).replace(/,/g, "")
-            ),
-            url: pages[index].url(),
-          };
-
+          const cheapestFlightPriceObj = createPriceObject(
+            cheapestFlightPrice,
+            page.url()
+          );
           cheapestFlightPrices.push(cheapestFlightPriceObj);
 
-          if (
-            smallestValueFound === undefined ||
-            cheapestFlightPriceObj.price < smallestValueFound
-          ) {
+          if (isNewSmallestPrice(cheapestFlightPriceObj.price)) {
             smallestValueFound = cheapestFlightPriceObj.price;
             newSmallestPriceFound = true;
           }
@@ -815,7 +808,6 @@ async function main() {
       }
 
       console.log("\nAdded cheapest prices.");
-
       const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
         cheapestFlightPrices
       ).sort((a, b) => a.price - b.price);
@@ -831,6 +823,30 @@ async function main() {
     } catch (error) {
       console.error("There has been an error.", error);
     }
+  }
+
+  function shouldInterruptByCaptcha(
+    interruptedByCaptcha: boolean,
+    index: number,
+    length: number
+  ): boolean {
+    return (
+      interruptedByCaptcha &&
+      (index === 0 || index === length - 1) &&
+      length > 2
+    );
+  }
+
+  function createPriceObject(price: string, url: string) {
+    return {
+      date: saturdayIso,
+      price: parseFloat(price.substring(1).replace(/,/g, "")),
+      url: url,
+    };
+  }
+
+  function isNewSmallestPrice(price: number): boolean {
+    return smallestValueFound === undefined || price < smallestValueFound;
   }
 
   function generateTableRow(item: CheapestFlightPrices) {
@@ -854,69 +870,100 @@ async function main() {
     startIndex: number = 0
   ): Promise<void> {
     console.log("Starting batch processing of URLs.\n");
-    const batchSize = 10;
-    let batchEndIndex: number;
 
+    const batchSize = 10;
     const browser = await launchBrowser(true);
 
     for (let i = startIndex; i < urls.length; i += batchSize) {
-      batchEndIndex = i + batchSize;
+      const batchEndIndex = i + batchSize;
       const currentBatch = urls.slice(i, batchEndIndex);
+
       console.log(`Processing batch from index ${i} to ${batchEndIndex - 1}`);
-
-      console.log("Browser launched for current batch.\n");
-
-      for (const url of currentBatch) {
-        console.log(`Processing URL at index ${urls.indexOf(url)}: ${url}`);
-        if (currentBatch.indexOf(url) !== 0)
-          await delay(Math.floor(Math.random() * 7500 + 7500));
-        try {
-          const page = await openPage(
-            browser,
-            url,
-            userAgents[Math.floor(Math.random() * userAgents.length)].useragent
-          );
-          console.log(`Opened URL at: ${url}.`);
-
-          if (currentBatch.indexOf(url) === 0) {
-            try {
-              await delay(2000);
-              await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
-              console.log("Accepted all cookies.\n");
-            } catch {
-              console.log("Cookies already accepted.");
-            }
-          }
-
-          await handleCaptcha(browser, page, urls.indexOf(url));
-        } catch (error) {
-          console.error(`Error processing URL ${url}:`, error);
-        }
-      }
-
-      console.log("Opened the whole batch. Obtaining prices...");
-
-      for (const page of await browser.pages()) {
-        await page.reload();
-      }
-
-      await delay(Math.floor(Math.random() * 15000 + 45000));
-      await addCheapestPrices(browser, false);
-
-      console.log("Closing the current batch.");
-
-      for (const page of await browser.pages()) {
-        await page.close();
-      }
-
-      await delay(Math.floor(Math.random() * 30000 + 60000));
+      await processBatch(browser, currentBatch);
 
       if (batchEndIndex >= urls.length) {
-        saturday.setDate(saturday.getDate() + 7);
-        saturdayIso = saturday.toISOString().substring(0, 10);
-        beginAutomatization();
+        updateDateAndRestart();
       }
     }
+  }
+
+  async function processBatch(browser: Browser, currentBatch: string[]) {
+    console.log("Browser launched for current batch.\n");
+
+    for (const url of currentBatch) {
+      await processUrl(browser, url, currentBatch.indexOf(url));
+    }
+
+    console.log("Opened the whole batch. Obtaining prices...");
+
+    await reloadPages(browser);
+    await addCheapestPrices(browser, false);
+    await closePages(browser);
+
+    console.log("Closing the current batch.");
+    await delay(Math.floor(Math.random() * 30000 + 60000));
+  }
+
+  async function processUrl(browser: Browser, url: string, index: number) {
+    console.log(`Processing URL at index ${index}: ${url}`);
+    if (index !== 0) await delay(Math.floor(Math.random() * 7500 + 7500));
+
+    try {
+      const page = await openPage(
+        browser,
+        url,
+        userAgents[Math.floor(Math.random() * userAgents.length)].useragent
+      );
+      console.log(`Opened URL at: ${url}.`);
+
+      if (index === 0) await acceptCookies(page);
+      await simulateMouseMovement(page);
+      await handleCaptcha(browser, page, index);
+    } catch (error) {
+      console.error(`Error processing URL ${url}:`, error);
+    }
+  }
+
+  async function acceptCookies(page: Page) {
+    try {
+      await delay(2000);
+      await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
+      console.log("Accepted all cookies.\n");
+    } catch {
+      console.log("Cookies already accepted.");
+    }
+  }
+
+  async function simulateMouseMovement(page: Page) {
+    await page.mouse.move(
+      Math.floor(Math.random() * 100 + 100),
+      Math.floor(Math.random() * 100 + 100)
+    );
+    await page.mouse.move(
+      Math.floor(Math.random() * 200 + 200),
+      Math.floor(Math.random() * 200 + 200)
+    );
+  }
+
+  async function reloadPages(browser: Browser) {
+    for (const page of await browser.pages()) {
+      await delay(Math.floor(Math.random() * 5000 + 5000));
+      await page.reload();
+    }
+    await delay(Math.floor(Math.random() * 15000 + 45000));
+  }
+
+  async function closePages(browser: Browser) {
+    for (const page of await browser.pages()) {
+      await delay(Math.floor(Math.random() * 2000 + 1000));
+      await page.close();
+    }
+  }
+
+  function updateDateAndRestart() {
+    saturday.setDate(saturday.getDate() + 7);
+    saturdayIso = saturday.toISOString().substring(0, 10);
+    beginAutomatization();
   }
 
   async function sendCheapestPricesEmail(cheapestPrice: CheapestFlightPrices) {
