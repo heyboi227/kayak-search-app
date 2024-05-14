@@ -570,16 +570,17 @@ async function main() {
 
   const originAirportsAndCities: string[] = ["BEG", "KVO", "TSR"];
 
-  const saturday = new Date("2024-06-22");
+  const saturday = new Date("2024-05-18");
   let saturdayIso = saturday.toISOString().substring(0, 10);
 
   let urlsToOpen: string[] = [];
 
   let firstCodeIndexPerLoop: number = 0;
 
-  type CheapestFlightPrices = { price: number; url: string };
+  type CheapestFlightPrices = { date: string; price: number; url: string };
 
   let cheapestFlightPrices: CheapestFlightPrices[] = [];
+  let smallestValueFound: number | undefined = undefined;
 
   async function sendMail(to: string, subject: string, message: string) {
     const transporter = nodemailer.createTransport({
@@ -719,6 +720,18 @@ async function main() {
 
   async function handleCaptcha(browser: Browser, page: Page, urlIndex: number) {
     if (await isCaptchaPage(page.url())) {
+      for (const page of await browser.pages()) {
+        let index: number = 0;
+        if (
+          (index === 0 || index === (await browser.pages()).length - 1) &&
+          (await browser.pages()).length > 2
+        )
+          continue;
+
+        await page.reload();
+        index++;
+      }
+
       await addCheapestPrices(browser, true);
 
       await browser.close();
@@ -767,45 +780,73 @@ async function main() {
     browser: Browser,
     interruptedByCaptcha: boolean
   ) {
+    let newSmallestPriceFound: boolean = false;
+
     try {
       const pages = await browser.pages();
+
       for (let index = 0; index < pages.length; index++) {
         if (interruptedByCaptcha) {
-          if (index === pages.length - 1) return;
+          if ((index === 0 || index === pages.length - 1) && pages.length > 2)
+            return;
         }
 
         const cheapestFlightPrice = await getCheapestFlightPrice(pages[index]);
 
-        if (cheapestFlightPrice === null || cheapestFlightPrice === undefined)
-          continue;
+        if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
+          const cheapestFlightPriceObj = {
+            date: saturdayIso,
+            price: parseFloat(
+              cheapestFlightPrice.substring(1).replace(/,/g, "")
+            ),
+            url: pages[index].url(),
+          };
 
-        const cheapestFlightPriceObj = {
-          price: parseFloat(cheapestFlightPrice.substring(1).replace(/,/g, "")),
-          url: pages[index].url(),
-        };
+          cheapestFlightPrices.push(cheapestFlightPriceObj);
 
-        cheapestFlightPrices.push(cheapestFlightPriceObj);
+          if (
+            smallestValueFound === undefined ||
+            cheapestFlightPriceObj.price < smallestValueFound
+          ) {
+            smallestValueFound = cheapestFlightPriceObj.price;
+            newSmallestPriceFound = true;
+          }
+        }
       }
 
       console.log("\nAdded cheapest prices.");
+
+      const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
+        cheapestFlightPrices
+      ).sort((a, b) => a.price - b.price);
+
+      if (newSmallestPriceFound && smallestValueFound !== undefined) {
+        const priceInfo = cheapestPricesUnderThePercentile.find(
+          (p) => p.price === smallestValueFound
+        );
+        if (priceInfo) {
+          await sendCheapestPricesEmail(priceInfo);
+        }
+      }
     } catch (error) {
       console.error("There has been an error.", error);
     }
   }
 
-  function generateTableRows(data: CheapestFlightPrices[]) {
-    return data
-      .map(
-        (item) => `
+  function generateTableRow(item: CheapestFlightPrices) {
+    return `
       <tr>
-          <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${item.price}</td>
+          <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
+            item.date
+          ).toLocaleDateString("sr")}</td>
+          <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
+            item.price
+          }</td>
           <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
               <a href="${item.url}" target="_blank">${item.url}</a>
           </td>
       </tr>
-  `
-      )
-      .join("");
+  `;
   }
 
   async function openTabsInEdge(
@@ -816,19 +857,20 @@ async function main() {
     const batchSize = 10;
     let batchEndIndex: number;
 
+    const browser = await launchBrowser(true);
+
     for (let i = startIndex; i < urls.length; i += batchSize) {
       batchEndIndex = i + batchSize;
       const currentBatch = urls.slice(i, batchEndIndex);
       console.log(`Processing batch from index ${i} to ${batchEndIndex - 1}`);
 
-      const browser = await launchBrowser(true);
       console.log("Browser launched for current batch.\n");
 
       for (const url of currentBatch) {
         console.log(`Processing URL at index ${urls.indexOf(url)}: ${url}`);
+        if (currentBatch.indexOf(url) !== 0)
+          await delay(Math.floor(Math.random() * 7500 + 7500));
         try {
-          if (currentBatch.indexOf(url) !== 0) await delay(10000);
-
           const page = await openPage(
             browser,
             url,
@@ -837,9 +879,13 @@ async function main() {
           console.log(`Opened URL at: ${url}.`);
 
           if (currentBatch.indexOf(url) === 0) {
-            await delay(2000);
-            await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
-            console.log("Accepted all cookies.\n");
+            try {
+              await delay(2000);
+              await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
+              console.log("Accepted all cookies.\n");
+            } catch {
+              console.log("Cookies already accepted.");
+            }
           }
 
           await handleCaptcha(browser, page, urls.indexOf(url));
@@ -849,62 +895,61 @@ async function main() {
       }
 
       console.log("Opened the whole batch. Obtaining prices...");
+
+      for (const page of await browser.pages()) {
+        await page.reload();
+      }
+
       await delay(Math.floor(Math.random() * 15000 + 45000));
       await addCheapestPrices(browser, false);
 
-      await browser.close();
-      console.log("Browser closed for current batch.\n");
+      console.log("Closing the current batch.");
+
+      for (const page of await browser.pages()) {
+        await page.close();
+      }
 
       await delay(Math.floor(Math.random() * 30000 + 60000));
 
       if (batchEndIndex >= urls.length) {
-        console.log(
-          "All batches processed. Sending email with cheapest prices."
-        );
-        await sendCheapestPricesEmail();
-        return;
+        saturday.setDate(saturday.getDate() + 7);
+        saturdayIso = saturday.toISOString().substring(0, 10);
+        beginAutomatization();
       }
     }
-    beginAutomatization();
   }
 
-  async function sendCheapestPricesEmail() {
-    const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
-      cheapestFlightPrices
-    ).sort((a, b) => a.price - b.price);
-
-    console.log("I have sent you some flight prices via mail. Thank me later.");
+  async function sendCheapestPricesEmail(cheapestPrice: CheapestFlightPrices) {
+    console.log(
+      "New cheapest price found! Sending it to your mail right away."
+    );
 
     await sendMail(
       "milosjeknic@hotmail.rs",
-      `Cheapest prices for ${new Date(saturdayIso).toLocaleDateString("sr")}`,
+      `Hooray! New cheapest price found.`,
       `<!DOCTYPE html>
         <html lang="en">
           <head>
             <meta charset="UTF-8">
           </head>
           <body>
-              <p>Hey there! Here are some of the prices I could find:</p>
+              <p>Hey there! This is the cheapest price that I've managed to find so far. Check it out.</p>
               <h2>Price Overview</h2>
               <table style="width: 100%; border-collapse: collapse;">
                   <thead>
                       <tr style="background-color: #f2f2f2;">
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
                           <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
                           <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
                       </tr>
                   </thead>
                   <tbody>
-                      <!-- Data rows will go here -->
-                      ${generateTableRows(cheapestPricesUnderThePercentile)}
+                      ${generateTableRow(cheapestPrice)}
                   </tbody>
               </table>
           </body>
         </html>`
     );
-
-    cheapestFlightPrices.length = 0;
-    saturday.setDate(saturday.getDate() + 7);
-    saturdayIso = saturday.toISOString().substring(0, 10);
   }
 
   function beginAutomatization(startIndex: number = 0) {
