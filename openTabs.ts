@@ -580,7 +580,9 @@ async function main() {
   type CheapestFlightPrices = { date: string; price: number; url: string };
 
   let cheapestFlightPrices: CheapestFlightPrices[] = [];
-  let smallestValueFound: number | undefined = undefined;
+
+  let smallestValueFoundGlobally: number | undefined = undefined;
+  let smallestValueFoundInSingleBatch: number | undefined = undefined;
 
   async function sendMail(to: string, subject: string, message: string) {
     const transporter = nodemailer.createTransport({
@@ -660,33 +662,6 @@ async function main() {
     }
   }
 
-  function findCheapPricesByPercentile(
-    data: number[],
-    percentile: number
-  ): number[] {
-    const sortedPrices = [...data].sort((a, b) => a - b);
-    const index = Math.floor((percentile / 100) * sortedPrices.length);
-    const cutoff = sortedPrices[index];
-    return data.filter((price) => price <= cutoff);
-  }
-
-  function findObjectsWithCheapFlightPrices(
-    cheapestFlightPrices: CheapestFlightPrices[]
-  ): CheapestFlightPrices[] {
-    if (cheapestFlightPrices.length === 0) return undefined;
-
-    const cheapestPrices = findCheapPricesByPercentile(
-      cheapestFlightPrices.map(
-        (cheapestFlightPrice) => cheapestFlightPrice.price
-      ),
-      10
-    );
-
-    return cheapestFlightPrices.filter((cheapestFlightPrice) =>
-      cheapestPrices.includes(cheapestFlightPrice.price)
-    );
-  }
-
   function generateLink(
     destination: string,
     aircraftModel: string,
@@ -742,6 +717,9 @@ async function main() {
         page.url(),
         userAgents[Math.floor(Math.random() * userAgents.length)].useragent
       );
+
+      await delay(2000);
+      await acceptCookies(newPage);
 
       await notifyCaptchaNeeded();
       await waitForCaptchaSolution(newPage);
@@ -801,23 +779,29 @@ async function main() {
           cheapestFlightPrices.push(cheapestFlightPriceObj);
 
           if (isNewSmallestPrice(cheapestFlightPriceObj.price)) {
-            smallestValueFound = cheapestFlightPriceObj.price;
+            smallestValueFoundInSingleBatch = cheapestFlightPriceObj.price;
             newSmallestPriceFound = true;
           }
         }
       }
 
       console.log("\nAdded cheapest prices.");
-      const cheapestPricesUnderThePercentile = findObjectsWithCheapFlightPrices(
-        cheapestFlightPrices
-      ).sort((a, b) => a.price - b.price);
 
-      if (newSmallestPriceFound && smallestValueFound !== undefined) {
-        const priceInfo = cheapestPricesUnderThePercentile.find(
-          (p) => p.price === smallestValueFound
-        );
-        if (priceInfo) {
-          await sendCheapestPricesEmail(priceInfo);
+      if (
+        newSmallestPriceFound &&
+        smallestValueFoundInSingleBatch !== undefined
+      ) {
+        if (
+          smallestValueFoundGlobally === undefined ||
+          smallestValueFoundInSingleBatch < smallestValueFoundGlobally
+        ) {
+          smallestValueFoundGlobally = smallestValueFoundInSingleBatch;
+          const priceInfo = cheapestFlightPrices.find(
+            (p) => p.price === smallestValueFoundGlobally
+          );
+          if (priceInfo) {
+            await sendCheapestPricesEmail(priceInfo);
+          }
         }
       }
     } catch (error) {
@@ -846,7 +830,10 @@ async function main() {
   }
 
   function isNewSmallestPrice(price: number): boolean {
-    return smallestValueFound === undefined || price < smallestValueFound;
+    return (
+      smallestValueFoundInSingleBatch === undefined ||
+      price < smallestValueFoundInSingleBatch
+    );
   }
 
   function generateTableRow(item: CheapestFlightPrices) {
@@ -891,7 +878,7 @@ async function main() {
     console.log("Browser launched for current batch.\n");
 
     for (const url of currentBatch) {
-      await processUrl(browser, url, currentBatch.indexOf(url));
+      await processUrl(browser, url, urlsToOpen.indexOf(url));
     }
 
     console.log("Opened the whole batch. Obtaining prices...");
@@ -917,6 +904,10 @@ async function main() {
       console.log(`Opened URL at: ${url}.`);
 
       if (index === 0) await acceptCookies(page);
+      if (
+        (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+      )
+        await page.reload();
       await simulateMouseMovement(page);
       await handleCaptcha(browser, page, index);
     } catch (error) {
@@ -946,17 +937,21 @@ async function main() {
   }
 
   async function reloadPages(browser: Browser) {
-    for (const page of await browser.pages()) {
-      await delay(Math.floor(Math.random() * 5000 + 5000));
-      await page.reload();
+    for (const [index, page] of (await browser.pages()).entries()) {
+      if (index > 0) {
+        await delay(Math.floor(Math.random() * 5000 + 5000));
+        await page.reload();
+      }
     }
     await delay(Math.floor(Math.random() * 15000 + 45000));
   }
 
   async function closePages(browser: Browser) {
-    for (const page of await browser.pages()) {
-      await delay(Math.floor(Math.random() * 2000 + 1000));
-      await page.close();
+    for (const [index, page] of (await browser.pages()).entries()) {
+      if (index > 0) {
+        await delay(Math.floor(Math.random() * 2000 + 1000));
+        await page.close();
+      }
     }
   }
 
@@ -1000,7 +995,7 @@ async function main() {
   }
 
   function beginAutomatization(startIndex: number = 0) {
-    prepareUrls().then(() => {
+    prepareUrls(startIndex).then(() => {
       openTabsInEdge(urlsToOpen, startIndex);
     });
   }
