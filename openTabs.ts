@@ -613,9 +613,8 @@ async function main() {
     }
   }
 
-  async function prepareUrls(startIndex: number = 0) {
+  async function prepareUrls() {
     urlsToOpen.length = 0;
-    firstCodeIndexPerLoop = startIndex;
 
     try {
       await processAirports();
@@ -632,11 +631,7 @@ async function main() {
         !restrictedAirportCodes.includes(airportCode)
     );
 
-    for (
-      let i = firstCodeIndexPerLoop;
-      i < filteredAirportCodes.length;
-      i += 3
-    ) {
+    for (let i = 0; i < filteredAirportCodes.length; i += 3) {
       const slicedCodes = filteredAirportCodes.slice(i, i + 3);
 
       if (slicedCodes.length === 0) break;
@@ -645,8 +640,6 @@ async function main() {
       const link = generateLink(codesString, aircraftCode, true);
       urlsToOpen.push(link);
     }
-
-    firstCodeIndexPerLoop = filteredAirportCodes.length;
   }
 
   async function processCities() {
@@ -695,13 +688,14 @@ async function main() {
 
   async function handleCaptcha(browser: Browser, page: Page, urlIndex: number) {
     if (await isCaptchaPage(page.url())) {
-      for (const page of await browser.pages()) {
+      const pages = await browser.pages();
+      for (const page of pages) {
         let index: number = 0;
-        if (
-          (index === 0 || index === (await browser.pages()).length - 1) &&
-          (await browser.pages()).length > 2
-        )
+        if ((index === 0 || index === pages.length - 1) && pages.length > 2) {
           continue;
+        } else if (pages.length <= 2) {
+          break;
+        }
 
         await page.reload();
         index++;
@@ -718,14 +712,14 @@ async function main() {
         userAgents[Math.floor(Math.random() * userAgents.length)].useragent
       );
 
-      await delay(2000);
+      await delay(3500);
       await acceptCookies(newPage);
 
       await notifyCaptchaNeeded();
       await waitForCaptchaSolution(newPage);
 
       await browser.close();
-      beginAutomatization(urlIndex);
+      await openTabs(urlsToOpen, urlIndex);
     }
   }
 
@@ -767,7 +761,9 @@ async function main() {
         if (
           shouldInterruptByCaptcha(interruptedByCaptcha, index, pages.length)
         ) {
-          return;
+          continue;
+        } else if (pages.length <= 2) {
+          break;
         }
 
         const cheapestFlightPrice = await getCheapestFlightPrice(page);
@@ -852,7 +848,7 @@ async function main() {
   `;
   }
 
-  async function openTabsInEdge(
+  async function openTabs(
     urls: string[],
     startIndex: number = 0
   ): Promise<void> {
@@ -866,7 +862,7 @@ async function main() {
       const currentBatch = urls.slice(i, batchEndIndex);
 
       console.log(`Processing batch from index ${i} to ${batchEndIndex - 1}`);
-      await processBatch(browser, currentBatch);
+      await processBatch(browser, currentBatch, i);
 
       if (batchEndIndex >= urls.length) {
         updateDateAndRestart();
@@ -874,11 +870,16 @@ async function main() {
     }
   }
 
-  async function processBatch(browser: Browser, currentBatch: string[]) {
+  async function processBatch(
+    browser: Browser,
+    currentBatch: string[],
+    batchStartIndex: number
+  ) {
     console.log("Browser launched for current batch.\n");
 
-    for (const url of currentBatch) {
-      await processUrl(browser, url, urlsToOpen.indexOf(url));
+    for (const [batchIndex, url] of currentBatch.entries()) {
+      const globalIndex = batchStartIndex + batchIndex;
+      await processUrl(browser, url, globalIndex, batchIndex);
     }
 
     console.log("Opened the whole batch. Obtaining prices...");
@@ -891,9 +892,16 @@ async function main() {
     await delay(Math.floor(Math.random() * 30000 + 60000));
   }
 
-  async function processUrl(browser: Browser, url: string, index: number) {
-    console.log(`Processing URL at index ${index}: ${url}`);
-    if (index !== 0) await delay(Math.floor(Math.random() * 7500 + 7500));
+  async function processUrl(
+    browser: Browser,
+    url: string,
+    globalIndex: number,
+    batchIndex: number
+  ) {
+    console.log(
+      `Processing URL at batch index ${batchIndex} (global index ${globalIndex}): ${url}`
+    );
+    if (batchIndex !== 0) await delay(Math.floor(Math.random() * 7500 + 7500));
 
     try {
       const page = await openPage(
@@ -903,13 +911,13 @@ async function main() {
       );
       console.log(`Opened URL at: ${url}.`);
 
-      if (index === 0) await acceptCookies(page);
+      if (batchIndex === 0) await acceptCookies(page);
       if (
         (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
       )
         await page.reload();
       await simulateMouseMovement(page);
-      await handleCaptcha(browser, page, index);
+      await handleCaptcha(browser, page, globalIndex);
     } catch (error) {
       console.error(`Error processing URL ${url}:`, error);
     }
@@ -917,7 +925,7 @@ async function main() {
 
   async function acceptCookies(page: Page) {
     try {
-      await delay(2000);
+      await delay(3500);
       await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
       console.log("Accepted all cookies.\n");
     } catch {
@@ -958,7 +966,7 @@ async function main() {
   function updateDateAndRestart() {
     saturday.setDate(saturday.getDate() + 7);
     saturdayIso = saturday.toISOString().substring(0, 10);
-    beginAutomatization();
+    prepareUrls().then(() => openTabs(urlsToOpen));
   }
 
   async function sendCheapestPricesEmail(cheapestPrice: CheapestFlightPrices) {
@@ -994,13 +1002,7 @@ async function main() {
     );
   }
 
-  function beginAutomatization(startIndex: number = 0) {
-    prepareUrls(startIndex).then(() => {
-      openTabsInEdge(urlsToOpen, startIndex);
-    });
-  }
-
-  beginAutomatization();
+  prepareUrls().then(() => openTabs(urlsToOpen));
 }
 
 main();
