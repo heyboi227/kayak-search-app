@@ -103,6 +103,7 @@ async function acceptCookiesAfterVerification(page: Page) {
 async function processLinks(
   browser: Browser,
   links: string[],
+  aircraftType: string,
   startIndex: number = 0
 ) {
   let index = startIndex;
@@ -128,7 +129,7 @@ async function processLinks(
       browser = await launchBrowser(true);
 
       restoreState(savedState);
-      await processLinks(browser, links, savedState.index);
+      await processLinks(browser, links, aircraftType, savedState.index);
     } else {
       await delay(1500);
       acceptCookiesAfterVerification(detailPage);
@@ -137,7 +138,11 @@ async function processLinks(
     index++;
 
     try {
-      const detailRows = await extractAirportCodes(detailPage);
+      const detailRows = await extractAirportCodes(
+        browser,
+        detailPage,
+        aircraftType
+      );
       detailRows.forEach(processAirportCode);
     } catch (error) {
       console.error("Error processing link", link, error);
@@ -147,29 +152,90 @@ async function processLinks(
   }
 }
 
-async function extractAirportCodes(page: Page) {
+async function checkIfAirportsShouldBeAdded(
+  browser: Browser,
+  url: string,
+  aircraftType: string
+): Promise<boolean> {
+  const page = await openPage(browser, url, getRandomUserAgent());
+
+  const detailTable = await page.$("#tbl-datatable");
+  if (!detailTable) return;
+
+  const detailRows = await detailTable.$$("tbody > tr");
+  const aircraftOperating: string[] = [];
+
+  for (const detailRow of detailRows) {
+    const aircraftTypeCell = await detailRow.$("td:nth-child(6)");
+    const aircraftType = (await getCellText(aircraftTypeCell)).trim();
+    const aircraftTypeIata = aircraftType.slice(0, 4);
+    aircraftOperating.push(aircraftTypeIata);
+  }
+  if (
+    aircraftOperating.filter((aircraft) => aircraft === aircraftType).length /
+      aircraftOperating.length >=
+    0.5
+  ) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+async function extractAirportCodes(
+  browser: Browser,
+  page: Page,
+  aircraftType: string
+) {
   const detailTable = await page.$("#tbl-datatable");
   if (!detailTable) return [];
 
-  const detailRows = await detailTable.$$("tr");
-  const airportCodes = [];
+  const detailRows = await detailTable.$$("tbody > tr");
+  const airportCodes: string[] = [];
 
   for (const detailRow of detailRows) {
-    const cells = await Promise.all([
+    const cells:
+      | []
+      | [
+          ElementHandle<HTMLTableCellElement>,
+          ElementHandle<HTMLTableCellElement>,
+          ElementHandle<HTMLAnchorElement>
+        ] = await Promise.all([
       detailRow.$("td:nth-child(4)"),
       detailRow.$("td:nth-child(5)"),
+      detailRow.$("td:nth-child(6) > a"),
     ]).catch(() => []);
-    const [originCell, destinationCell] = cells;
+    const [originCell, destinationCell, flightLinkCell] = cells;
 
-    if (originCell && destinationCell) {
-      const originCode = (await getCellText(originCell)).slice(-4, -1);
-      const destinationCode = (await getCellText(destinationCell)).slice(
-        -4,
-        -1
-      );
-      if (originCode && destinationCode) {
-        airportCodes.push(originCode, destinationCode);
+    try {
+      if (flightLinkCell) {
+        console.log(
+          `Should get link for flight: ${(
+            await getCellText(flightLinkCell)
+          ).trim()}`
+        );
+        const flightLink = await getCellLink(flightLinkCell);
+
+        const shouldAddAirports = await checkIfAirportsShouldBeAdded(
+          browser,
+          flightLink,
+          aircraftType
+        );
+
+        if (originCell && destinationCell) {
+          const originCode = (await getCellText(originCell))
+            .trim()
+            .slice(-4, -1);
+          const destinationCode = (await getCellText(destinationCell))
+            .trim()
+            .slice(-4, -1);
+          if (originCode && destinationCode && shouldAddAirports) {
+            airportCodes.push(originCode, destinationCode);
+          }
+        }
       }
+    } catch (error) {
+      console.error("Error processing link", error);
     }
   }
 
@@ -181,6 +247,10 @@ function processAirportCode(code: string) {
     console.log(`Airport code ${code} added to table.`);
   }
   airportAndCityCodes.add(code);
+}
+
+async function getCellLink(cell: ElementHandle<HTMLAnchorElement>) {
+  return await cell.evaluate((cell) => cell.href.trim());
 }
 
 async function getCellText(cell: ElementHandle) {
@@ -217,7 +287,7 @@ async function obtainCodes(browser: Browser, aircraftType: string) {
       return;
     }
 
-    const rows = await table.$$("tr");
+    const rows = await table.$$("tbody > tr");
     const links = [];
 
     for (const row of rows) {
@@ -230,7 +300,7 @@ async function obtainCodes(browser: Browser, aircraftType: string) {
 
     console.log(`Found ${links.length} aircraft to process.`);
 
-    await processLinks(browser, links);
+    await processLinks(browser, links, aircraftType);
   } catch (error) {
     console.error("An error occurred in obtainCodes:", error);
   }

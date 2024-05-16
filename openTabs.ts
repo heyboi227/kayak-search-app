@@ -575,8 +575,6 @@ async function main() {
 
   let urlsToOpen: string[] = [];
 
-  let firstCodeIndexPerLoop: number = 0;
-
   type CheapestFlightPrices = { date: string; price: number; url: string };
 
   let cheapestFlightPrices: CheapestFlightPrices[] = [];
@@ -865,6 +863,7 @@ async function main() {
       await processBatch(browser, currentBatch, i);
 
       if (batchEndIndex >= urls.length) {
+        await browser.close();
         updateDateAndRestart();
       }
     }
