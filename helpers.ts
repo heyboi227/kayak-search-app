@@ -1,11 +1,23 @@
-import { promises as fs } from "fs";
+import fs from "fs";
+import path from "path";
 
-export async function saveData(data: any[], filename: string): Promise<void> {
-  const jsonData = JSON.stringify(data);
-  await fs.writeFile(filename, jsonData, "utf8");
+export async function saveData(data: any, filename: string): Promise<void> {
+  const filePath = path.resolve(__dirname, filename);
+  try {
+    await fs.promises.appendFile(filePath, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error(`Error saving file ${filePath}:`, error);
+    throw error;
+  }
 }
 
-export async function loadData(filename: string): Promise<any[]> {
-  const jsonData = await fs.readFile(filename, "utf8");
-  return JSON.parse(jsonData);
+export async function loadData(filename: string): Promise<any> {
+  const filePath = path.resolve(__dirname, filename);
+  try {
+    const data = await fs.promises.readFile(filePath, "utf-8");
+    return JSON.parse(data);
+  } catch (error) {
+    console.error(`Error loading file ${filePath}:`, error);
+    throw error;
+  }
 }

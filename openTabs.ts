@@ -3,19 +3,16 @@ import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { userAgents } from "./userAgents";
 import { delay, launchBrowser, openPage } from "./prepareBrowser";
+import { loadData, saveData } from "./helpers";
 
-async function main() {
-  let airportAndCityCodes: Set<string> = new Set<string>();
+let airportCodes: string[] = [];
 
-  type CheapestFlightPrices = { date: string; price: number; url: string };
-
-  let cheapestFlightPrices: CheapestFlightPrices[] = [];
-
-  async function retrievePricesForAircraftTypes(aircraftTypes: string[]) {
-    console.log("Let's grab these flights, shall we?");
+async function obtainCodes() {
+  async function retrieveCodesForAircraftTypes(aircraftTypes: string[]) {
+    console.log("Let's grab these airports, shall we?");
     console.log("Pray that the FlightRadar24 developers will not catch us.");
     console.log(
-      "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie. Or two. Or get some good sleep, whatever pleases you."
+      "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie."
     );
 
     for (const aircraftType of aircraftTypes) {
@@ -25,22 +22,11 @@ async function main() {
       if (pages.length > 1) await pages[0].close();
 
       await obtainCodes(browser, aircraftType);
-      await sendPricesEmail(cheapestFlightPrices);
 
       await browser.close();
     }
 
-    console.log(
-      `Succesfully added ${airportAndCityCodes.size} airports. Let's go!`
-    );
-
-    // updateDateAndRestart(aircraftTypes);
-  }
-
-  function updateDateAndRestart(aircraftTypes: string[]) {
-    saturday.setDate(saturday.getDate() + 7);
-    saturdayIso = saturday.toISOString().substring(0, 10);
-    retrievePricesForAircraftTypes(aircraftTypes);
+    console.log(`Succesfully added ${airportCodes.length} airports. Let's go!`);
   }
 
   function saveCurrentState(index: number) {
@@ -106,15 +92,8 @@ async function main() {
           detailPage,
           aircraftType
         );
-        for (let i = 0; i < airportCodes.length; i += 2) {
-          await processAirportCode(
-            browser,
-            `https://www.kayak.ie/flights/${airportCodes[i]}-${
-              airportCodes[i + 1]
-            }/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~787;stops=~0`,
-            airportCodes[i]
-          );
-        }
+
+        await saveData(airportCodes, "codes.json");
       } catch (error) {
         console.error("Error processing link", link, error);
       } finally {
@@ -232,18 +211,6 @@ async function main() {
     return airportCodes;
   }
 
-  async function processAirportCode(
-    browser: Browser,
-    url: string,
-    code: string
-  ) {
-    await openTab(browser, url);
-    if (!airportAndCityCodes.has(code)) {
-      console.log(`Airport code ${code} added to table.`);
-    }
-    airportAndCityCodes.add(code);
-  }
-
   async function getCellLink(cell: ElementHandle<HTMLAnchorElement>) {
     return await cell.evaluate((cell) => cell.href.trim());
   }
@@ -300,12 +267,20 @@ async function main() {
       console.log(`Found ${links.length} aircraft to process.`);
 
       await processLinks(browser, links, aircraftType);
-      if (cheapestFlightPrices.length > 0)
-        await sendPricesEmail(cheapestFlightPrices);
     } catch (error) {
       console.error("An error occurred in obtainCodes:", error);
     }
   }
+
+  retrieveCodesForAircraftTypes(["B788", "B789", "B78X"]);
+}
+
+async function main() {
+  type CheapestFlightPrices = { date: string; price: number; url: string };
+
+  let cheapestFlightPrices: CheapestFlightPrices[] = [];
+
+  airportCodes = await loadData("codes.json");
 
   const restrictedAirportCodes: string[] = [
     "AAO",
@@ -423,6 +398,7 @@ async function main() {
     "DGU",
     "DIP",
     "DKS",
+    "DME",
     "DOR",
     "DPT",
     "DSO",
@@ -491,6 +467,7 @@ async function main() {
     "IAR",
     "ICA",
     "ICC",
+    "IEV",
     "IFH",
     "IFN",
     "IGT",
@@ -498,6 +475,7 @@ async function main() {
     "IHR",
     "IIL",
     "IJK",
+    "IKA",
     "IKS",
     "IKT",
     "IMO",
@@ -520,6 +498,7 @@ async function main() {
     "KAM",
     "KAV",
     "KAW",
+    "KBP",
     "KCK",
     "KDY",
     "KEA",
@@ -626,6 +605,8 @@ async function main() {
     "NFG",
     "NGK",
     "NIX",
+    "NJC",
+    "NJF",
     "NLI",
     "NMS",
     "NMT",
@@ -643,8 +624,6 @@ async function main() {
     "NYT",
     "NYU",
     "NYW",
-    "NJC",
-    "NJF",
     "ODA",
     "ODJ",
     "ODO",
@@ -658,6 +637,7 @@ async function main() {
     "OMI",
     "OMS",
     "ONK",
+    "OSF",
     "OSM",
     "OSW",
     "OUA",
@@ -744,6 +724,7 @@ async function main() {
     "STW",
     "SUK",
     "SUR",
+    "SVO",
     "SVX",
     "SVZ",
     "SWT",
@@ -763,6 +744,7 @@ async function main() {
     "TGK",
     "TGP",
     "THL",
+    "THR",
     "THX",
     "TIO",
     "TIP",
@@ -812,6 +794,7 @@ async function main() {
     "VHV",
     "VIG",
     "VIL",
+    "VKO",
     "VKT",
     "VLI",
     "VLN",
@@ -852,6 +835,7 @@ async function main() {
     "YKS",
     "ZAH",
     "ZBR",
+    "ZIA",
     "ZIS",
     "ZIX",
     "ZKP",
@@ -859,10 +843,12 @@ async function main() {
     "ZZO",
   ];
 
-  const restrictedAirportCities = ["MOW", "IEV", "THR"];
+  const aircraftModel = "787";
 
   const saturday = new Date("2024-05-18");
   let saturdayIso = saturday.toISOString().substring(0, 10);
+
+  let urlsToOpen: string[] = [];
 
   async function sendMail(to: string, subject: string, message: string) {
     const transporter = nodemailer.createTransport({
@@ -893,6 +879,32 @@ async function main() {
     }
   }
 
+  async function prepareUrls() {
+    urlsToOpen.length = 0;
+
+    try {
+      const filteredAirportCodes = airportCodes.filter(
+        (airportCode) => !restrictedAirportCodes.includes(airportCode)
+      );
+
+      for (let i = 0; i < filteredAirportCodes.length; i += 2) {
+        const slicedCodes = filteredAirportCodes.slice(i, i + 3);
+
+        if (slicedCodes.length === 0) break;
+
+        const codesString = slicedCodes.join("-");
+        const link = generateLink(codesString, aircraftModel);
+        urlsToOpen.push(link);
+      }
+    } catch (error) {
+      console.error("There has been an error.", error);
+    }
+  }
+
+  function generateLink(originAndDestination: string, aircraftModel: string) {
+    return `https://www.kayak.ie/flights/${originAndDestination}/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~${aircraftModel};stops=~0`;
+  }
+
   async function notifyCaptchaNeeded() {
     sendMail(
       "milosjeknic@hotmail.rs",
@@ -915,8 +927,21 @@ async function main() {
     return url.includes("security/check") || url.includes("sitecaptcha");
   }
 
-  async function handleCaptcha(browser: Browser, page: Page) {
+  async function handleCaptcha(browser: Browser, page: Page, urlIndex: number) {
     if (await isCaptchaPage(page.url())) {
+      const pages = await browser.pages();
+      for (const page of pages) {
+        let index: number = 0;
+        if ((index === 0 || index === pages.length - 1) && pages.length > 2) {
+          continue;
+        } else if (pages.length <= 2) {
+          break;
+        }
+
+        await page.reload();
+        index++;
+      }
+
       await addCheapestPrice(browser, cheapestFlightPrices, true);
 
       await browser.close();
@@ -935,7 +960,7 @@ async function main() {
       await waitForCaptchaSolution(newPage);
 
       await browser.close();
-      await openTab(browser, page.url());
+      await openTabs(urlsToOpen, urlIndex);
     }
   }
 
@@ -1043,10 +1068,55 @@ async function main() {
   async function openTab(browser: Browser, url: string): Promise<void> {
     console.log(`Opening URL tab at: ${url}\n`);
 
-    await processUrl(browser, url);
+    await processSingleUrl(browser, url);
   }
 
-  async function processUrl(browser: Browser, url: string) {
+  async function openTabs(
+    urls: string[],
+    startIndex: number = 0
+  ): Promise<void> {
+    console.log("Starting batch processing of URLs.\n");
+
+    const batchSize = 10;
+    const browser = await launchBrowser(true);
+
+    for (let i = startIndex; i < urls.length; i += batchSize) {
+      const batchEndIndex = i + batchSize;
+      const currentBatch = urls.slice(i, batchEndIndex);
+
+      console.log(`Processing batch from index ${i} to ${batchEndIndex - 1}`);
+      await processBatch(browser, currentBatch, i);
+
+      if (batchEndIndex >= urls.length) {
+        await browser.close();
+        updateDateAndRestart();
+      }
+    }
+  }
+
+  async function processBatch(
+    browser: Browser,
+    currentBatch: string[],
+    batchStartIndex: number
+  ) {
+    console.log("Browser launched for current batch.\n");
+
+    for (const [batchIndex, url] of currentBatch.entries()) {
+      const globalIndex = batchStartIndex + batchIndex;
+      await processUrl(browser, url, globalIndex, batchIndex);
+    }
+
+    console.log("Opened the whole batch. Obtaining prices...");
+
+    await reloadPages(browser);
+    await addCheapestPrice(browser, cheapestFlightPrices, false);
+    await closePages(browser);
+
+    console.log("Closing the current batch.");
+    await delay(Math.floor(Math.random() * 30000 + 60000));
+  }
+
+  async function processSingleUrl(browser: Browser, url: string) {
     console.log(`Processing URL: ${url}`);
     try {
       const page = await openPage(
@@ -1064,12 +1134,42 @@ async function main() {
       )
         await page.reload();
       await simulateMouseMovement(page);
-      await handleCaptcha(browser, page);
 
       await delay(Math.floor(Math.random() * 15000 + 45000));
       await addCheapestPrice(browser, cheapestFlightPrices, false);
 
       await page.close();
+    } catch (error) {
+      console.error(`Error processing URL ${url}:`, error);
+    }
+  }
+
+  async function processUrl(
+    browser: Browser,
+    url: string,
+    globalIndex: number,
+    batchIndex: number
+  ) {
+    console.log(
+      `Processing URL at batch index ${batchIndex} (global index ${globalIndex}): ${url}`
+    );
+    if (batchIndex !== 0) await delay(Math.floor(Math.random() * 7500 + 7500));
+
+    try {
+      const page = await openPage(
+        browser,
+        url,
+        userAgents[Math.floor(Math.random() * userAgents.length)].useragent
+      );
+      console.log(`Opened URL at: ${url}.`);
+
+      if (batchIndex === 0) await acceptCookies(page);
+      if (
+        (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+      )
+        await page.reload();
+      await simulateMouseMovement(page);
+      await handleCaptcha(browser, page, globalIndex);
     } catch (error) {
       console.error(`Error processing URL ${url}:`, error);
     }
@@ -1094,6 +1194,31 @@ async function main() {
       Math.floor(Math.random() * 200 + 200),
       Math.floor(Math.random() * 200 + 200)
     );
+  }
+
+  async function reloadPages(browser: Browser) {
+    for (const [index, page] of (await browser.pages()).entries()) {
+      if (index > 0) {
+        await delay(Math.floor(Math.random() * 5000 + 5000));
+        await page.reload();
+      }
+    }
+    await delay(Math.floor(Math.random() * 15000 + 45000));
+  }
+
+  async function closePages(browser: Browser) {
+    for (const [index, page] of (await browser.pages()).entries()) {
+      if (index > 0) {
+        await delay(Math.floor(Math.random() * 2000 + 1000));
+        await page.close();
+      }
+    }
+  }
+
+  function updateDateAndRestart() {
+    saturday.setDate(saturday.getDate() + 7);
+    saturdayIso = saturday.toISOString().substring(0, 10);
+    prepareUrls().then(() => openTabs(urlsToOpen));
   }
 
   async function sendPricesEmail(cheapestPrices: CheapestFlightPrices[]) {
@@ -1129,7 +1254,7 @@ async function main() {
     );
   }
 
-  await retrievePricesForAircraftTypes(["B788", "B789", "B78X"]);
+  prepareUrls().then(() => openTabs(urlsToOpen));
 }
 
-main();
+obtainCodes().then(main);
