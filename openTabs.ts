@@ -3,320 +3,309 @@ import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { userAgents } from "./userAgents";
 import { delay, launchBrowser, openPage } from "./prepareBrowser";
-import { loadData } from "./helpers";
-
-const cityCodesForMultipleAirports = {
-  BJS: ["PEK", "PKX"],
-  BHZ: ["CNF", "PLU"],
-  BUH: ["OTP", "BBU"],
-  BUE: ["EZE", "AEP"],
-  CHI: ["ORD", "MDW", "RFD"],
-  JKT: ["CGK", "HLP"],
-  LON: ["LHR", "LGW", "LCY", "STN", "LTN", "SEN"],
-  MIL: ["MXP", "LIN", "BGY"],
-  YMQ: ["YUL", "YMX", "YHU"],
-  MOW: ["SVO", "DME", "VKO", "ZIA", "OSF"],
-  NYC: ["JFK", "LGA", "EWR"],
-  OSA: ["ITM", "KIX", "UKB"],
-  PAR: ["ORY", "CDG", "LBG", "BVA"],
-  RIO: ["GIG", "SDU"],
-  ROM: ["FCO", "CIA"],
-  SAO: ["CGH", "GRU", "VCP"],
-  SPK: ["CTS", "OKD"],
-  SEL: ["ICN", "GMP"],
-  STO: ["ARN", "BMA", "NYO", "VST"],
-  TCI: ["TFN", "TFS"],
-  TYO: ["HND", "NRT"],
-  YTO: ["YYZ", "YTZ", "YHM", "YKF"],
-  WAS: ["IAD", "DCA", "BWI"],
-  ALA: ["ALA", "BXJ"],
-  BKK: ["BKK", "DMK", "BKK"],
-  BFS: ["BFS", "BHD"],
-  CTU: ["CTU", "TFU", "HZU"],
-  CMB: ["CMB", "RML"],
-  DKR: ["DKR", "DSS"],
-  DFW: ["DFW", "DAL", "FTW", "AFW", "ADS"],
-  DXB: ["DXB", "DWC"],
-  GLA: ["GLA", "PIK"],
-  HOU: ["HOU", "IAH", "EFD"],
-  IST: ["IST", "SAW", "ISL"],
-  JNB: ["JNB", "HLA"],
-  KUL: ["KUL", "SZB", "KUL"],
-  IEV: ["IEV", "KBP"],
-  LAX: ["LAX", "SBD", "ONT", "SNA", "VNY", "PMD", "LGB", "BUR"],
-  MDE: ["MDE", "EOH"],
-  MEX: ["MEX", "NLU"],
-  MEL: ["MEL", "MEB", "AVV"],
-  MIA: ["MIA", "FLL", "PBI"],
-  NGO: ["NGO", "NKM"],
-  SAN: ["SAN", "TIJ"],
-  SFO: ["SFO", "OAK", "SJC", "STS"],
-  SEA: ["SEA", "BFI", "PAE"],
-  SHA: ["PVG", "SHA"],
-  TPE: ["TPE", "TSA"],
-  THR: ["IKA", "THR"],
-};
-
-let airportAndCityCodes: Set<string> = new Set<string>();
-
-async function retrieveCodesForAircraftTypes(aircraftTypes: string[]) {
-  console.log("Let's grab these airports, shall we?");
-  console.log("Pray that the FlightRadar24 developers will not catch us.");
-  console.log(
-    "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie."
-  );
-
-  for (const aircraftType of aircraftTypes) {
-    const browser = await launchBrowser(true);
-
-    const pages = await browser.pages();
-    if (pages.length > 1) await pages[0].close();
-
-    await obtainCodes(browser, aircraftType);
-
-    await browser.close();
-  }
-
-  console.log(
-    `Succesfully added ${airportAndCityCodes.size} airports. Let's go!`
-  );
-}
-
-function saveCurrentState(index: number) {
-  return {
-    index,
-  };
-}
-
-function restoreState(savedState: { index: number }) {}
-
-async function acceptCookiesAfterVerification(page: Page) {
-  try {
-    await page.click("#onetrust-accept-btn-handler");
-    console.log("Accepted all cookies, unfortunately.");
-    await delay(1500);
-  } catch {}
-}
-
-async function processLinks(
-  browser: Browser,
-  links: { aircraftReg: string; link: string }[],
-  aircraftType: string,
-  startIndex: number = 0
-) {
-  let index = startIndex;
-
-  for (const link of links.slice(startIndex > 0 ? ++startIndex : startIndex)) {
-    console.log(`Opening data for ${link.aircraftReg}.`);
-    const detailPage = await openPage(browser, link.link, getRandomUserAgent());
-
-    await delay(Math.floor(Math.random() * 2000 + 1000));
-
-    if (
-      (await detailPage.$eval("html", (page) => page.innerHTML)).includes(
-        "Verifying"
-      )
-    ) {
-      let savedState = saveCurrentState(index);
-
-      await delay(Math.floor(Math.random() * 10000 + 15000));
-
-      acceptCookiesAfterVerification(detailPage);
-
-      await browser.close();
-      await delay(Math.floor(Math.random() * 5000 + 10000));
-      browser = await launchBrowser(true);
-
-      restoreState(savedState);
-      await processLinks(browser, links, aircraftType, savedState.index);
-    } else {
-      await delay(1500);
-      acceptCookiesAfterVerification(detailPage);
-    }
-
-    index++;
-
-    try {
-      const detailRows = await extractAirportCodes(
-        browser,
-        detailPage,
-        aircraftType
-      );
-      detailRows.forEach(processAirportCode);
-    } catch (error) {
-      console.error("Error processing link", link, error);
-    } finally {
-      await detailPage.close();
-    }
-  }
-}
-
-async function checkIfAirportsShouldBeAdded(
-  browser: Browser,
-  url: string,
-  aircraftType: string
-): Promise<boolean> {
-  await delay(Math.floor(Math.random() * 2000 + 3000));
-  const page = await openPage(browser, url, getRandomUserAgent());
-
-  const detailTable = await page.$("#tbl-datatable");
-  if (!detailTable) return;
-
-  const detailRows = await detailTable.$$("tbody > tr");
-  const aircraftOperatingTheFlight: string[] = [];
-
-  for (const detailRow of detailRows) {
-    const aircraftTypeCell = await detailRow.$("td:nth-child(6)");
-    const aircraftType = (await getCellText(aircraftTypeCell)).trim();
-    const aircraftTypeIata = aircraftType.slice(0, 4);
-
-    aircraftOperatingTheFlight.push(aircraftTypeIata);
-  }
-
-  await page.close();
-  await delay(Math.floor(Math.random() * 1000 + 2000));
-
-  if (
-    aircraftOperatingTheFlight.filter((aircraft) =>
-      aircraftType.includes(aircraft)
-    ).length /
-      aircraftOperatingTheFlight.length >=
-    0.5
-  ) {
-    return true;
-  } else {
-    return false;
-  }
-}
-
-async function extractAirportCodes(
-  browser: Browser,
-  page: Page,
-  aircraftType: string
-) {
-  console.log("Trying to extract the airport codes. Please wait...");
-  const detailTable = await page.$("#tbl-datatable");
-  if (!detailTable) return [];
-
-  const detailRows = await detailTable.$$("tbody > tr");
-  const airportCodes: string[] = [];
-
-  for (const detailRow of detailRows) {
-    const cells:
-      | []
-      | [
-          ElementHandle<HTMLTableCellElement>,
-          ElementHandle<HTMLTableCellElement>,
-          ElementHandle<HTMLAnchorElement>
-        ] = await Promise.all([
-      detailRow.$("td:nth-child(4)"),
-      detailRow.$("td:nth-child(5)"),
-      detailRow.$("td:nth-child(6) > a"),
-    ]).catch(() => []);
-    const [originCell, destinationCell, flightLinkCell] = cells;
-
-    try {
-      if (originCell && destinationCell && flightLinkCell) {
-        const originCode = (await getCellText(originCell)).trim().slice(-4, -1);
-        const destinationCode = (await getCellText(destinationCell))
-          .trim()
-          .slice(-4, -1);
-        const flightLink = await getCellLink(flightLinkCell);
-
-        const shouldAddAirports = await checkIfAirportsShouldBeAdded(
-          browser,
-          flightLink,
-          aircraftType
-        );
-
-        if (shouldAddAirports) {
-          airportCodes.push(originCode, destinationCode);
-        }
-      }
-    } catch (error) {
-      console.error("Error processing link", error);
-    }
-  }
-
-  return airportCodes;
-}
-
-function processAirportCode(code: string) {
-  if (!airportAndCityCodes.has(code)) {
-    console.log(`Airport code ${code} added to table.`);
-  }
-  airportAndCityCodes.add(code);
-}
-
-async function getCellLink(cell: ElementHandle<HTMLAnchorElement>) {
-  return await cell.evaluate((cell) => cell.href.trim());
-}
-
-async function getCellText(cell: ElementHandle) {
-  return await cell.evaluate((cell) => cell.textContent.trim());
-}
-
-function getRandomUserAgent() {
-  return userAgents[Math.floor(Math.random() * userAgents.length)].useragent;
-}
-
-let cookiesAccepted: boolean = false;
-
-async function obtainCodes(browser: Browser, aircraftType: string) {
-  cookiesAccepted = false;
-
-  try {
-    const page = await openPage(
-      browser,
-      `https://www.flightradar24.com/data/aircraft/${aircraftType}`,
-      getRandomUserAgent()
-    );
-
-    console.log(`Opened page at ${page.url()}`);
-
-    if (!cookiesAccepted) {
-      await page.click("#onetrust-accept-btn-handler");
-      console.log("Accepted all cookies, unfortunately.");
-      cookiesAccepted = true;
-    }
-
-    const table = await page.$("#cnt-list-aircraft > table");
-    if (!table) {
-      console.error("Table not found");
-      return;
-    }
-
-    const rows = await table.$$("tbody > tr");
-    const links: { aircraftReg: string; link: string }[] = [];
-
-    for (const row of rows) {
-      const linkElement = await row.$("td:nth-child(2) > a");
-      if (linkElement) {
-        const link = (await linkElement.evaluate((a) => a.href)).trim();
-        const aircraftReg = (
-          await linkElement.evaluate((a) => a.textContent)
-        ).trim();
-        const linkObj = { aircraftReg, link };
-        links.push(linkObj);
-      }
-    }
-
-    console.log(`Found ${links.length} aircraft to process.`);
-
-    await processLinks(browser, links, aircraftType);
-  } catch (error) {
-    console.error("An error occurred in obtainCodes:", error);
-  }
-}
 
 async function main() {
-  const airportCodes = await loadData("codes.json");
-  console.log("Successfully loaded airport codes!");
+  let airportAndCityCodes: Set<string> = new Set<string>();
 
-  const airportCities = await loadData("cities.json");
-  console.log("Successfully loaded airport cities!");
+  type CheapestFlightPrices = { date: string; price: number; url: string };
 
-  const aircraftCode = "787";
+  let cheapestFlightPrices: CheapestFlightPrices[] = [];
+
+  async function retrievePricesForAircraftTypes(aircraftTypes: string[]) {
+    console.log("Let's grab these flights, shall we?");
+    console.log("Pray that the FlightRadar24 developers will not catch us.");
+    console.log(
+      "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie. Or two. Or get some good sleep, whatever pleases you."
+    );
+
+    for (const aircraftType of aircraftTypes) {
+      const browser = await launchBrowser(true);
+
+      const pages = await browser.pages();
+      if (pages.length > 1) await pages[0].close();
+
+      await obtainCodes(browser, aircraftType);
+      await sendPricesEmail(cheapestFlightPrices);
+
+      await browser.close();
+    }
+
+    console.log(
+      `Succesfully added ${airportAndCityCodes.size} airports. Let's go!`
+    );
+
+    // updateDateAndRestart(aircraftTypes);
+  }
+
+  function updateDateAndRestart(aircraftTypes: string[]) {
+    saturday.setDate(saturday.getDate() + 7);
+    saturdayIso = saturday.toISOString().substring(0, 10);
+    retrievePricesForAircraftTypes(aircraftTypes);
+  }
+
+  function saveCurrentState(index: number) {
+    return {
+      index,
+    };
+  }
+
+  async function acceptCookiesAfterVerification(page: Page) {
+    try {
+      await page.click("#onetrust-accept-btn-handler");
+      console.log("Accepted all cookies, unfortunately.");
+      await delay(1500);
+    } catch {}
+  }
+
+  async function processLinks(
+    browser: Browser,
+    links: { aircraftReg: string; link: string }[],
+    aircraftType: string,
+    startIndex: number = 0
+  ) {
+    let index = startIndex;
+
+    for (const link of links.slice(
+      startIndex > 0 ? ++startIndex : startIndex
+    )) {
+      console.log(`Opening data for ${link.aircraftReg}.`);
+      const detailPage = await openPage(
+        browser,
+        link.link,
+        getRandomUserAgent()
+      );
+
+      await delay(Math.floor(Math.random() * 2000 + 1000));
+
+      if (
+        (await detailPage.$eval("html", (page) => page.innerHTML)).includes(
+          "Verifying"
+        )
+      ) {
+        let savedState = saveCurrentState(index);
+
+        await delay(Math.floor(Math.random() * 10000 + 15000));
+
+        acceptCookiesAfterVerification(detailPage);
+
+        await browser.close();
+        await delay(Math.floor(Math.random() * 5000 + 10000));
+        browser = await launchBrowser(true);
+
+        await processLinks(browser, links, aircraftType, savedState.index);
+      } else {
+        await delay(1500);
+        acceptCookiesAfterVerification(detailPage);
+      }
+
+      index++;
+
+      try {
+        const airportCodes = await extractAirportCodes(
+          browser,
+          detailPage,
+          aircraftType
+        );
+        for (let i = 0; i < airportCodes.length; i += 2) {
+          await processAirportCode(
+            browser,
+            `https://www.kayak.ie/flights/${airportCodes[i]}-${
+              airportCodes[i + 1]
+            }/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~787;stops=~0`,
+            airportCodes[i]
+          );
+        }
+      } catch (error) {
+        console.error("Error processing link", link, error);
+      } finally {
+        await detailPage.close();
+      }
+    }
+  }
+
+  async function checkIfAirportsShouldBeAdded(
+    browser: Browser,
+    url: string,
+    aircraftType: string
+  ): Promise<boolean> {
+    await delay(Math.floor(Math.random() * 2000 + 3000));
+    const page = await openPage(browser, url, getRandomUserAgent());
+
+    const detailTable = await page.$("#tbl-datatable");
+    if (!detailTable) return;
+
+    const detailRows = await detailTable.$$("tbody > tr");
+    const aircraftOperatingTheFlight: string[] = [];
+
+    for (const detailRow of detailRows) {
+      const aircraftTypeCell = await detailRow.$("td:nth-child(6)");
+      const aircraftType = (await getCellText(aircraftTypeCell)).trim();
+      const aircraftTypeIata = aircraftType.slice(0, 4);
+
+      aircraftOperatingTheFlight.push(aircraftTypeIata);
+    }
+
+    await page.close();
+    await delay(Math.floor(Math.random() * 1000 + 2000));
+
+    if (
+      aircraftOperatingTheFlight.filter((aircraft) =>
+        aircraftType.includes(aircraft)
+      ).length /
+        aircraftOperatingTheFlight.length >=
+      0.5
+    ) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  async function extractAirportCodes(
+    browser: Browser,
+    page: Page,
+    aircraftType: string
+  ) {
+    console.log("Obtaining flight prices. Please wait...");
+    const processedRotations = new Set<string>();
+
+    const detailTable = await page.$("#tbl-datatable");
+    if (!detailTable) return [];
+
+    const detailRows = await detailTable.$$("tbody > tr");
+    const airportCodes: string[] = [];
+
+    for (const detailRow of detailRows) {
+      const cells:
+        | []
+        | [
+            ElementHandle<HTMLTableCellElement>,
+            ElementHandle<HTMLTableCellElement>,
+            ElementHandle<HTMLAnchorElement>
+          ] = await Promise.all([
+        detailRow.$("td:nth-child(4)"),
+        detailRow.$("td:nth-child(5)"),
+        detailRow.$("td:nth-child(6) > a"),
+      ]).catch(() => []);
+      const [originCell, destinationCell, flightLinkCell] = cells;
+
+      try {
+        if (originCell && destinationCell && flightLinkCell) {
+          const originCode = (await getCellText(originCell))
+            .trim()
+            .slice(-4, -1);
+          const destinationCode = (await getCellText(destinationCell))
+            .trim()
+            .slice(-4, -1);
+          const flightLink = await getCellLink(flightLinkCell);
+
+          const shouldAddAirports = await checkIfAirportsShouldBeAdded(
+            browser,
+            flightLink,
+            aircraftType
+          );
+
+          if (shouldAddAirports) {
+            const forwardRotation = `${originCode}-${destinationCode}`;
+            const returnRotation = `${destinationCode}-${originCode}`;
+
+            if (
+              !processedRotations.has(forwardRotation) &&
+              !processedRotations.has(returnRotation)
+            ) {
+              airportCodes.push(originCode);
+              airportCodes.push(destinationCode);
+
+              airportCodes.push(destinationCode);
+              airportCodes.push(originCode);
+
+              processedRotations.add(forwardRotation);
+              processedRotations.add(returnRotation);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error processing link", error);
+      }
+    }
+
+    return airportCodes;
+  }
+
+  async function processAirportCode(
+    browser: Browser,
+    url: string,
+    code: string
+  ) {
+    await openTab(browser, url);
+    if (!airportAndCityCodes.has(code)) {
+      console.log(`Airport code ${code} added to table.`);
+    }
+    airportAndCityCodes.add(code);
+  }
+
+  async function getCellLink(cell: ElementHandle<HTMLAnchorElement>) {
+    return await cell.evaluate((cell) => cell.href.trim());
+  }
+
+  async function getCellText(cell: ElementHandle) {
+    return await cell.evaluate((cell) => cell.textContent.trim());
+  }
+
+  function getRandomUserAgent() {
+    return userAgents[Math.floor(Math.random() * userAgents.length)].useragent;
+  }
+
+  let cookiesAccepted: boolean = false;
+
+  async function obtainCodes(browser: Browser, aircraftType: string) {
+    cookiesAccepted = false;
+
+    try {
+      const page = await openPage(
+        browser,
+        `https://www.flightradar24.com/data/aircraft/${aircraftType}`,
+        getRandomUserAgent()
+      );
+
+      console.log(`Opened page at ${page.url()}`);
+
+      if (!cookiesAccepted) {
+        await page.click("#onetrust-accept-btn-handler");
+        console.log("Accepted all cookies, unfortunately.");
+        cookiesAccepted = true;
+      }
+
+      const table = await page.$("#cnt-list-aircraft > table");
+      if (!table) {
+        console.error("Table not found");
+        return;
+      }
+
+      const rows = await table.$$("tbody > tr");
+      const links: { aircraftReg: string; link: string }[] = [];
+
+      for (const row of rows) {
+        const linkElement = await row.$("td:nth-child(2) > a");
+        if (linkElement) {
+          const link = (await linkElement.evaluate((a) => a.href)).trim();
+          const aircraftReg = (
+            await linkElement.evaluate((a) => a.textContent)
+          ).trim();
+          const linkObj = { aircraftReg, link };
+          links.push(linkObj);
+        }
+      }
+
+      console.log(`Found ${links.length} aircraft to process.`);
+
+      await processLinks(browser, links, aircraftType);
+      if (cheapestFlightPrices.length > 0)
+        await sendPricesEmail(cheapestFlightPrices);
+    } catch (error) {
+      console.error("An error occurred in obtainCodes:", error);
+    }
+  }
 
   const restrictedAirportCodes: string[] = [
     "AAO",
@@ -872,19 +861,8 @@ async function main() {
 
   const restrictedAirportCities = ["MOW", "IEV", "THR"];
 
-  const originAirportsAndCities: string[] = ["BEG", "KVO", "TSR"];
-
   const saturday = new Date("2024-05-18");
   let saturdayIso = saturday.toISOString().substring(0, 10);
-
-  let urlsToOpen: string[] = [];
-
-  type CheapestFlightPrices = { date: string; price: number; url: string };
-
-  let cheapestFlightPrices: CheapestFlightPrices[] = [];
-
-  let smallestValueFoundGlobally: number | undefined = undefined;
-  let smallestValueFoundInSingleBatch: number | undefined = undefined;
 
   async function sendMail(to: string, subject: string, message: string) {
     const transporter = nodemailer.createTransport({
@@ -915,57 +893,6 @@ async function main() {
     }
   }
 
-  async function prepareUrls() {
-    urlsToOpen.length = 0;
-
-    try {
-      await processAirports();
-      await processCities();
-    } catch (error) {
-      console.error("There has been an error.", error);
-    }
-  }
-
-  async function processAirports() {
-    const filteredAirportCodes = airportCodes.filter(
-      (airportCode) =>
-        !originAirportsAndCities.includes(airportCode) &&
-        !restrictedAirportCodes.includes(airportCode)
-    );
-
-    for (let i = 0; i < filteredAirportCodes.length; i += 3) {
-      const slicedCodes = filteredAirportCodes.slice(i, i + 3);
-
-      if (slicedCodes.length === 0) break;
-
-      const codesString = slicedCodes.join(",");
-      const link = generateLink(codesString, aircraftCode, true);
-      urlsToOpen.push(link);
-    }
-  }
-
-  async function processCities() {
-    const filteredAirportCities = airportCities.filter(
-      (airportCity) =>
-        !originAirportsAndCities.includes(airportCity) &&
-        !restrictedAirportCities.includes(airportCity)
-    );
-
-    for (const airportCity of filteredAirportCities) {
-      const link = generateLink(airportCity, aircraftCode, false);
-      urlsToOpen.push(link);
-    }
-  }
-
-  function generateLink(
-    destination: string,
-    aircraftModel: string,
-    areSameAirports: boolean
-  ) {
-    const sameAirportsParam = areSameAirports ? "sameair=sameair;" : "";
-    return `https://www.kayak.ie/flights/${originAirportsAndCities.join()}-${destination}/${saturdayIso}-flexible-1day/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~${aircraftModel};${sameAirportsParam}virtualinterline=-virtualinterline;baditin=baditin;triplength=-1`;
-  }
-
   async function notifyCaptchaNeeded() {
     sendMail(
       "milosjeknic@hotmail.rs",
@@ -988,22 +915,9 @@ async function main() {
     return url.includes("security/check") || url.includes("sitecaptcha");
   }
 
-  async function handleCaptcha(browser: Browser, page: Page, urlIndex: number) {
+  async function handleCaptcha(browser: Browser, page: Page) {
     if (await isCaptchaPage(page.url())) {
-      const pages = await browser.pages();
-      for (const page of pages) {
-        let index: number = 0;
-        if ((index === 0 || index === pages.length - 1) && pages.length > 2) {
-          continue;
-        } else if (pages.length <= 2) {
-          break;
-        }
-
-        await page.reload();
-        index++;
-      }
-
-      await addCheapestPrices(browser, true);
+      await addCheapestPrice(browser, cheapestFlightPrices, true);
 
       await browser.close();
       browser = await launchBrowser(false);
@@ -1021,7 +935,7 @@ async function main() {
       await waitForCaptchaSolution(newPage);
 
       await browser.close();
-      await openTabs(urlsToOpen, urlIndex);
+      await openTab(browser, page.url());
     }
   }
 
@@ -1050,12 +964,11 @@ async function main() {
     return cheapestFlightPrice;
   }
 
-  async function addCheapestPrices(
+  async function addCheapestPrice(
     browser: Browser,
+    priceArray: CheapestFlightPrices[],
     interruptedByCaptcha: boolean
   ) {
-    let newSmallestPriceFound: boolean = false;
-
     try {
       const pages = await browser.pages();
 
@@ -1064,7 +977,10 @@ async function main() {
           shouldInterruptByCaptcha(interruptedByCaptcha, index, pages.length)
         ) {
           continue;
-        } else if (pages.length <= 2) {
+        } else if (
+          shouldInterruptByCaptcha(interruptedByCaptcha, index, pages.length) &&
+          pages.length <= 2
+        ) {
           break;
         }
 
@@ -1074,34 +990,11 @@ async function main() {
             cheapestFlightPrice,
             page.url()
           );
-          cheapestFlightPrices.push(cheapestFlightPriceObj);
-
-          if (isNewSmallestPrice(cheapestFlightPriceObj.price)) {
-            smallestValueFoundInSingleBatch = cheapestFlightPriceObj.price;
-            newSmallestPriceFound = true;
-          }
+          priceArray.push(cheapestFlightPriceObj);
         }
       }
 
-      console.log("\nAdded cheapest prices.");
-
-      if (
-        newSmallestPriceFound &&
-        smallestValueFoundInSingleBatch !== undefined
-      ) {
-        if (
-          smallestValueFoundGlobally === undefined ||
-          smallestValueFoundInSingleBatch < smallestValueFoundGlobally
-        ) {
-          smallestValueFoundGlobally = smallestValueFoundInSingleBatch;
-          const priceInfo = cheapestFlightPrices.find(
-            (p) => p.price === smallestValueFoundGlobally
-          );
-          if (priceInfo) {
-            await sendCheapestPricesEmail(priceInfo);
-          }
-        }
-      }
+      console.log("\nAdded cheapest price.");
     } catch (error) {
       console.error("There has been an error.", error);
     }
@@ -1127,85 +1020,34 @@ async function main() {
     };
   }
 
-  function isNewSmallestPrice(price: number): boolean {
-    return (
-      smallestValueFoundInSingleBatch === undefined ||
-      price < smallestValueFoundInSingleBatch
-    );
-  }
-
-  function generateTableRow(item: CheapestFlightPrices) {
+  function generateTableRows(items: CheapestFlightPrices[]) {
     return `
       <tr>
-          <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
-            item.date
-          ).toLocaleDateString("sr")}</td>
+          ${items.map(
+            (
+              item
+            ) => `<td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
+              item.date
+            ).toLocaleDateString("sr")}</td>
           <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
             item.price
           }</td>
           <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
               <a href="${item.url}" target="_blank">${item.url}</a>
-          </td>
+          </td>`
+          )}
       </tr>
   `;
   }
 
-  async function openTabs(
-    urls: string[],
-    startIndex: number = 0
-  ): Promise<void> {
-    console.log("Starting batch processing of URLs.\n");
+  async function openTab(browser: Browser, url: string): Promise<void> {
+    console.log(`Opening URL tab at: ${url}\n`);
 
-    const batchSize = 10;
-    const browser = await launchBrowser(true);
-
-    for (let i = startIndex; i < urls.length; i += batchSize) {
-      const batchEndIndex = i + batchSize;
-      const currentBatch = urls.slice(i, batchEndIndex);
-
-      console.log(`Processing batch from index ${i} to ${batchEndIndex - 1}`);
-      await processBatch(browser, currentBatch, i);
-
-      if (batchEndIndex >= urls.length) {
-        await browser.close();
-        updateDateAndRestart();
-      }
-    }
+    await processUrl(browser, url);
   }
 
-  async function processBatch(
-    browser: Browser,
-    currentBatch: string[],
-    batchStartIndex: number
-  ) {
-    console.log("Browser launched for current batch.\n");
-
-    for (const [batchIndex, url] of currentBatch.entries()) {
-      const globalIndex = batchStartIndex + batchIndex;
-      await processUrl(browser, url, globalIndex, batchIndex);
-    }
-
-    console.log("Opened the whole batch. Obtaining prices...");
-
-    await reloadPages(browser);
-    await addCheapestPrices(browser, false);
-    await closePages(browser);
-
-    console.log("Closing the current batch.");
-    await delay(Math.floor(Math.random() * 30000 + 60000));
-  }
-
-  async function processUrl(
-    browser: Browser,
-    url: string,
-    globalIndex: number,
-    batchIndex: number
-  ) {
-    console.log(
-      `Processing URL at batch index ${batchIndex} (global index ${globalIndex}): ${url}`
-    );
-    if (batchIndex !== 0) await delay(Math.floor(Math.random() * 7500 + 7500));
-
+  async function processUrl(browser: Browser, url: string) {
+    console.log(`Processing URL: ${url}`);
     try {
       const page = await openPage(
         browser,
@@ -1214,13 +1056,20 @@ async function main() {
       );
       console.log(`Opened URL at: ${url}.`);
 
-      if (batchIndex === 0) await acceptCookies(page);
+      await acceptCookies(page);
       if (
-        (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+        (await page.$eval("html", (page) => page.textContent)).includes(
+          "search results"
+        )
       )
         await page.reload();
       await simulateMouseMovement(page);
-      await handleCaptcha(browser, page, globalIndex);
+      await handleCaptcha(browser, page);
+
+      await delay(Math.floor(Math.random() * 15000 + 45000));
+      await addCheapestPrice(browser, cheapestFlightPrices, false);
+
+      await page.close();
     } catch (error) {
       console.error(`Error processing URL ${url}:`, error);
     }
@@ -1247,32 +1096,7 @@ async function main() {
     );
   }
 
-  async function reloadPages(browser: Browser) {
-    for (const [index, page] of (await browser.pages()).entries()) {
-      if (index > 0) {
-        await delay(Math.floor(Math.random() * 5000 + 5000));
-        await page.reload();
-      }
-    }
-    await delay(Math.floor(Math.random() * 15000 + 45000));
-  }
-
-  async function closePages(browser: Browser) {
-    for (const [index, page] of (await browser.pages()).entries()) {
-      if (index > 0) {
-        await delay(Math.floor(Math.random() * 2000 + 1000));
-        await page.close();
-      }
-    }
-  }
-
-  function updateDateAndRestart() {
-    saturday.setDate(saturday.getDate() + 7);
-    saturdayIso = saturday.toISOString().substring(0, 10);
-    prepareUrls().then(() => openTabs(urlsToOpen));
-  }
-
-  async function sendCheapestPricesEmail(cheapestPrice: CheapestFlightPrices) {
+  async function sendPricesEmail(cheapestPrices: CheapestFlightPrices[]) {
     console.log(
       "New cheapest price found! Sending it to your mail right away."
     );
@@ -1297,7 +1121,7 @@ async function main() {
                       </tr>
                   </thead>
                   <tbody>
-                      ${generateTableRow(cheapestPrice)}
+                      ${generateTableRows(cheapestPrices)}
                   </tbody>
               </table>
           </body>
@@ -1305,7 +1129,7 @@ async function main() {
     );
   }
 
-  prepareUrls().then(() => openTabs(urlsToOpen));
+  await retrievePricesForAircraftTypes(["B788", "B789", "B78X"]);
 }
 
 main();
