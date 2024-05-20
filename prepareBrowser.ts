@@ -17,7 +17,7 @@ export async function openPage(
 ) {
   const page = await browser.newPage();
   await page.setUserAgent(userAgent);
-  await page.goto(url);
+  await page.goto(url, { timeout: 0 });
   return page;
 }
 

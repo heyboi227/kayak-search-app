@@ -10,6 +10,16 @@
         "preLaunchTask": "tsc: build - tsconfig.json",  // Compiles TS before launch
         "outFiles": ["${workspaceFolder}/dist/**/*.js"],  // Location of compiled JS files
         "sourceMaps": true
+      },
+      {
+        "type": "node",
+        "request": "launch",
+        "name": "Launch codesHelper",
+        "skipFiles": ["<node_internals>/**"],
+        "program": "${workspaceFolder}/codesHelper.ts",
+        "preLaunchTask": "tsc: build - tsconfig.json",  // Compiles TS before launch
+        "outFiles": ["${workspaceFolder}/dist/**/*.js"],  // Location of compiled JS files
+        "sourceMaps": true
       }
     ]
   }
