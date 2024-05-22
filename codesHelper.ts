@@ -14,23 +14,20 @@ async function obtainRotations() {
       "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie."
     );
 
+    const browser = await launchBrowser(true);
+
     for (const aircraftType of aircraftTypes) {
-      await processAircraftType(aircraftType);
-      await saveData(airportRotations, "rotations.json");
+      await processAircraftType(browser, aircraftType);
     }
+
+    await saveData(airportRotations, "rotations.json");
+    await browser.close();
 
     console.log(`Successfully added the airports. Let's go!`);
   }
 
-  async function processAircraftType(aircraftType: string) {
-    const browser = await launchBrowser(true);
-
-    const pages = await browser.pages();
-    if (pages.length > 1) await pages[0].close();
-
+  async function processAircraftType(browser: Browser, aircraftType: string) {
     await obtainRotations(browser, aircraftType);
-
-    await browser.close();
   }
 
   async function acceptCookiesAfterVerification(page: Page) {
@@ -38,10 +35,34 @@ async function obtainRotations() {
       await page.click("#onetrust-accept-btn-handler");
       console.log("Accepted all cookies, unfortunately.");
       await delay(1500);
-    } catch {}
+    } catch {
+      console.log("Cookies already accepted.");
+    }
+  }
+
+  async function waitForVerification(
+    browser: Browser,
+    page: Page
+  ): Promise<Page> {
+    while (true) {
+      const pageContent = await page.$eval(
+        "html",
+        (element) => element.innerHTML
+      );
+      if (!pageContent.includes("Verifying")) {
+        return page;
+      }
+
+      await page.close();
+      await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
+      page = await openPage(browser, page.url(), getRandomUserAgent());
+      await acceptCookiesAfterVerification(page);
+      return page;
+    }
   }
 
   async function processLinks(
+    browser: Browser,
     links: { aircraftReg: string; link: string }[],
     aircraftType: string
   ) {
@@ -49,13 +70,9 @@ async function obtainRotations() {
     for (let i = 0; i < links.length; i += BATCH_SIZE) {
       const batch = links.slice(i, i + BATCH_SIZE);
 
-      const browser = await launchBrowser(true);
-
       for (const link of batch) {
         await processLink(browser, link, aircraftType);
       }
-
-      await browser.close();
     }
   }
 
@@ -65,16 +82,9 @@ async function obtainRotations() {
     aircraftType: string
   ) {
     console.log(`Opening data for ${link.aircraftReg}.`);
-    const detailPage = await openPage(browser, link.link, getRandomUserAgent());
+    let detailPage = await openPage(browser, link.link, getRandomUserAgent());
 
-    if (
-      (await detailPage.$eval("html", (page) => page.innerHTML)).includes(
-        "Verifying"
-      )
-    ) {
-      await delay(Math.floor(Math.random() * 10000 + 15000));
-      acceptCookiesAfterVerification(detailPage);
-    }
+    detailPage = await waitForVerification(browser, detailPage);
 
     try {
       await extractAirportRotations(browser, detailPage, aircraftType);
@@ -91,7 +101,9 @@ async function obtainRotations() {
     url: string,
     aircraftTypeICAO: string
   ): Promise<boolean> {
-    const page = await openPage(browser, url, getRandomUserAgent());
+    let page = await openPage(browser, url, getRandomUserAgent());
+
+    page = await waitForVerification(browser, page);
 
     const detailTable = await page.$("#tbl-datatable");
     if (!detailTable) return false;
@@ -161,7 +173,13 @@ async function obtainRotations() {
           const destinationCellText = (
             await getCellText(destinationCell)
           ).trim();
-          if (originCellText !== "" && destinationCellText !== "") {
+
+          const charRegex = /[a-zA-Z0-9]/;
+
+          if (
+            charRegex.test(originCellText) &&
+            charRegex.test(destinationCellText)
+          ) {
             const originCode = originCellText.slice(-4, -1);
             const destinationCode = destinationCellText.slice(-4, -1);
             const flightLink = await getCellLink(flightLinkCell);
@@ -215,9 +233,13 @@ async function obtainRotations() {
       console.log(`Opened page at ${page.url()}`);
 
       if (!cookiesAccepted) {
-        await page.click("#onetrust-accept-btn-handler");
-        console.log("Accepted all cookies, unfortunately.");
-        cookiesAccepted = true;
+        try {
+          await page.click("#onetrust-accept-btn-handler");
+          console.log("Accepted all cookies, unfortunately.");
+          cookiesAccepted = true;
+        } catch {
+          console.log("Cookies already accepted.");
+        }
       }
 
       const table = await page.$("#cnt-list-aircraft > table");
@@ -243,7 +265,7 @@ async function obtainRotations() {
       console.log(`Found ${links.length} aircraft to process.`);
       console.log(`Obtaining the aircraft's rotations. Please wait...`);
 
-      await processLinks(links, aircraftType);
+      await processLinks(browser, links, aircraftType);
     } catch (error) {
       console.error("An error occurred in obtainRotations:", error);
     }
