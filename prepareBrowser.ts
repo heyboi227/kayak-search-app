@@ -2,7 +2,8 @@ import puppeteer, { Browser } from "puppeteer-core";
 
 export async function launchBrowser(headless: boolean) {
   return puppeteer.launch({
-    channel: "chrome",
+    executablePath:
+      "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
     headless,
     protocolTimeout: 0,
     args: ["--start-maximized=true"],

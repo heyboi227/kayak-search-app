@@ -576,7 +576,7 @@ async function main() {
 
     const aircraftModel = "787";
 
-    const saturday = new Date("2024-05-18");
+    const saturday = new Date("2024-05-25");
     let saturdayIso = saturday.toISOString().substring(0, 10);
 
     let urlsToOpen: string[] = [];
@@ -615,16 +615,11 @@ async function main() {
 
       try {
         const filteredAirportCodes = airportRotations.filter(
-          (airportCode) => !restrictedAirportCodes.includes(airportCode)
+          (airportRotation) => !restrictedAirportCodes.includes(airportRotation)
         );
 
-        for (let i = 0; i < filteredAirportCodes.length; i += 2) {
-          const slicedCodes = filteredAirportCodes.slice(i, i + 3);
-
-          if (slicedCodes.length === 0) break;
-
-          const codesString = slicedCodes.join("-");
-          const link = generateLink(codesString, aircraftModel);
+        for (let i = 0; i < filteredAirportCodes.length; i++) {
+          const link = generateLink(filteredAirportCodes[i], aircraftModel);
           urlsToOpen.push(link);
         }
       } catch (error) {

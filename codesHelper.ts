@@ -35,9 +35,7 @@ async function obtainRotations() {
       await page.click("#onetrust-accept-btn-handler");
       console.log("Accepted all cookies, unfortunately.");
       await delay(1500);
-    } catch {
-      console.log("Cookies already accepted.");
-    }
+    } catch {}
   }
 
   async function waitForVerification(
@@ -50,14 +48,13 @@ async function obtainRotations() {
         (element) => element.innerHTML
       );
       if (!pageContent.includes("Verifying")) {
+        await acceptCookiesAfterVerification(page);
         return page;
       }
 
       await page.close();
       await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
       page = await openPage(browser, page.url(), getRandomUserAgent());
-      await acceptCookiesAfterVerification(page);
-      return page;
     }
   }
 
