@@ -1,7 +1,6 @@
-import { saveData } from "./helpers";
-import { delay, launchBrowser, openPage } from "./prepareBrowser";
+import { delay, getRandomUserAgent, saveData } from "./helpers";
+import { launchBrowser, openPage } from "./prepareBrowser";
 import { Browser, ElementHandle, Page } from "puppeteer-core";
-import { userAgents } from "./userAgents";
 import { aircraftMappings } from "./aircraftMappings";
 
 async function obtainRotations() {
@@ -209,10 +208,6 @@ async function obtainRotations() {
 
   async function getCellText(cell: ElementHandle) {
     return await cell.evaluate((cell) => cell.textContent.trim());
-  }
-
-  function getRandomUserAgent() {
-    return userAgents[Math.floor(Math.random() * userAgents.length)].useragent;
   }
 
   let cookiesAccepted: boolean = false;

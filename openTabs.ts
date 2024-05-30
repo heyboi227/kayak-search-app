@@ -1,17 +1,30 @@
 import { Browser, Page } from "puppeteer-core";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
-import { userAgents } from "./userAgents";
-import { delay, launchBrowser, openPage } from "./prepareBrowser";
-import { loadData } from "./helpers";
+import { launchBrowser, openPage } from "./prepareBrowser";
+import { delay, getRandomUserAgent, loadData } from "./helpers";
 
 async function main() {
   try {
     const airportRotations: string[] = await loadData("rotations.json");
 
-    type CheapestFlightPrices = { date: string; price: number; url: string };
+    type CheapestFlightPrice = { date: string; price: number; url: string };
 
-    let cheapestFlightPrices: CheapestFlightPrices[] = [];
+    type FlightDates = {
+      departureDate: string;
+      midpointDate: string;
+      returnDate: string;
+    };
+
+    let cheapestFlightPricesForSingleLegs: CheapestFlightPrice[] = [];
+    let cheapestFlightPrices: CheapestFlightPrice[] = [];
+
+    let smallestValueForSingleLegsFoundGlobally: number | undefined = undefined;
+    let smallestValueForSingleLegsFoundInSingleBatch: number | undefined =
+      undefined;
+
+    let smallestValueFoundGlobally: number | undefined = undefined;
+    let smallestValueFoundInSingleBatch: number | undefined = undefined;
 
     const restrictedAirportCodes: string[] = [
       "AAO",
@@ -576,10 +589,50 @@ async function main() {
 
     const aircraftModel = "787";
 
-    const saturday = new Date("2024-05-25");
+    const saturday = new Date("2024-06-08");
     let saturdayIso = saturday.toISOString().substring(0, 10);
 
-    let urlsToOpen: string[] = [];
+    let urlsToOpen: { url: string; airportRotation: string }[] = [];
+
+    function generateDateCombinations(inputDate: string): FlightDates[] {
+      const date = new Date(inputDate);
+
+      // Generate dates ±1 day
+      const getDates = (baseDate: Date): string[] => {
+        const dates: string[] = [];
+        for (let offset = -1; offset <= 1; offset++) {
+          const newDate = new Date(baseDate);
+          newDate.setDate(newDate.getDate() + offset);
+          dates.push(newDate.toISOString().split("T")[0]);
+        }
+        return dates;
+      };
+
+      const departureDates = getDates(date);
+      const midpointDates = getDates(date);
+      const returnDates = getDates(date);
+
+      const combinations: FlightDates[] = [];
+
+      // Generate valid combinations
+      for (const departureDate of departureDates) {
+        for (const midpointDate of midpointDates) {
+          for (const returnDate of returnDates) {
+            if (
+              new Date(midpointDate) >= new Date(departureDate) &&
+              new Date(returnDate) >= new Date(midpointDate)
+            )
+              combinations.push({
+                departureDate,
+                midpointDate,
+                returnDate,
+              });
+          }
+        }
+      }
+
+      return combinations;
+    }
 
     async function sendMail(to: string, subject: string, message: string) {
       const transporter = nodemailer.createTransport({
@@ -614,21 +667,32 @@ async function main() {
       urlsToOpen.length = 0;
 
       try {
-        const filteredAirportCodes = airportRotations.filter(
-          (airportRotation) => !restrictedAirportCodes.includes(airportRotation)
+        const filteredAirportRotations = airportRotations.filter(
+          (airportRotation) =>
+            !restrictedAirportCodes.includes(airportRotation.split("-")[0]) &&
+            !restrictedAirportCodes.includes(airportRotation.split("-")[1])
         );
 
-        for (let i = 0; i < filteredAirportCodes.length; i++) {
-          const link = generateLink(filteredAirportCodes[i], aircraftModel);
-          urlsToOpen.push(link);
+        for (const airportRotation of filteredAirportRotations) {
+          const linkAndAirportRotationObj = generateLinkAndAirportRotation(
+            airportRotation,
+            aircraftModel
+          );
+          urlsToOpen.push(linkAndAirportRotationObj);
         }
       } catch (error) {
         console.error("There has been an error.", error);
       }
     }
 
-    function generateLink(originAndDestination: string, aircraftModel: string) {
-      return `https://www.kayak.ie/flights/${originAndDestination}/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~${aircraftModel};stops=~0`;
+    function generateLinkAndAirportRotation(
+      originAndDestination: string,
+      aircraftModel: string
+    ) {
+      return {
+        url: `https://www.kayak.ie/flights/${originAndDestination}/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~${aircraftModel};stops=~0`,
+        airportRotation: originAndDestination,
+      };
     }
 
     async function notifyCaptchaNeeded() {
@@ -656,7 +720,7 @@ async function main() {
     async function handleCaptcha(
       browser: Browser,
       page: Page,
-      urlIndex: number
+      urlIndex: number = 0
     ) {
       if (await isCaptchaPage(page.url())) {
         const pages = await browser.pages();
@@ -672,7 +736,8 @@ async function main() {
           index++;
         }
 
-        await addCheapestPrice(browser, cheapestFlightPrices, true);
+        await addCheapestPricesForSingleLegs(browser, true);
+        await addCheapestPrices(browser, true);
 
         await browser.close();
         browser = await launchBrowser(false);
@@ -680,7 +745,7 @@ async function main() {
         const newPage = await openPage(
           browser,
           page.url(),
-          userAgents[Math.floor(Math.random() * userAgents.length)].useragent
+          getRandomUserAgent()
         );
 
         await delay(3500);
@@ -690,7 +755,53 @@ async function main() {
         await waitForCaptchaSolution(newPage);
 
         await browser.close();
-        await openTabs(urlsToOpen, urlIndex);
+        await openTabs(
+          urlsToOpen.map((url) => url.url),
+          urlIndex
+        );
+      }
+    }
+
+    async function handleDateCombinationsCaptcha(
+      browser: Browser,
+      page: Page,
+      cheapestFlightPrice: CheapestFlightPrice
+    ) {
+      if (await isCaptchaPage(page.url())) {
+        const pages = await browser.pages();
+        for (const page of pages) {
+          let index: number = 0;
+          if ((index === 0 || index === pages.length - 1) && pages.length > 2) {
+            continue;
+          } else if (pages.length <= 2) {
+            break;
+          }
+
+          await page.reload();
+          index++;
+        }
+
+        await addCheapestPricesForSingleLegs(browser, true);
+        await addCheapestPrices(browser, true);
+
+        await browser.close();
+        browser = await launchBrowser(false);
+
+        const newPage = await openPage(
+          browser,
+          page.url(),
+          getRandomUserAgent()
+        );
+
+        await delay(3500);
+        await acceptCookies(newPage);
+
+        await notifyCaptchaNeeded();
+        await waitForCaptchaSolution(newPage);
+
+        await browser.close();
+        await launchBrowser(true);
+        await findCombinationsForCheapestPrice(cheapestFlightPrice, browser);
       }
     }
 
@@ -719,22 +830,22 @@ async function main() {
       return cheapestFlightPrice;
     }
 
-    async function addCheapestPrice(
+    async function addCheapestPricesForSingleLegs(
       browser: Browser,
-      priceArray: CheapestFlightPrices[],
       interruptedByCaptcha: boolean
     ) {
+      let newSmallestPriceFound: boolean = false;
+
       try {
         const pages = await browser.pages();
 
         for (const [index, page] of pages.entries()) {
-          if (pages.length <= 2) {
-            break;
-          }
           if (
             shouldInterruptByCaptcha(interruptedByCaptcha, index, pages.length)
           ) {
             continue;
+          } else if (pages.length <= 2) {
+            break;
           }
 
           const cheapestFlightPrice = await getCheapestFlightPrice(page);
@@ -746,14 +857,125 @@ async function main() {
               cheapestFlightPrice,
               page.url()
             );
-            priceArray.push(cheapestFlightPriceObj);
+            cheapestFlightPricesForSingleLegs.push(cheapestFlightPriceObj);
+
+            if (isNewSmallestPrice(cheapestFlightPriceObj.price)) {
+              smallestValueForSingleLegsFoundInSingleBatch =
+                cheapestFlightPriceObj.price;
+              newSmallestPriceFound = true;
+            }
           }
         }
 
-        console.log("\nAdded cheapest price.");
+        console.log("\nAdded cheapest prices.");
+
+        if (
+          newSmallestPriceFound &&
+          smallestValueForSingleLegsFoundInSingleBatch !== undefined
+        ) {
+          if (
+            smallestValueForSingleLegsFoundGlobally === undefined ||
+            smallestValueForSingleLegsFoundInSingleBatch <
+              smallestValueForSingleLegsFoundGlobally
+          ) {
+            smallestValueForSingleLegsFoundGlobally =
+              smallestValueForSingleLegsFoundInSingleBatch;
+            const priceInfo = cheapestFlightPricesForSingleLegs.find(
+              (p) => p.price === smallestValueForSingleLegsFoundGlobally
+            );
+            if (priceInfo) {
+              for (const [index, page] of pages.entries()) {
+                if (index === 0) continue;
+                await page.close();
+              }
+              await findCombinationsForCheapestPrice(priceInfo, browser);
+            }
+          }
+        }
       } catch (error) {
         console.error("There has been an error.", error);
       }
+    }
+
+    async function addCheapestPrices(
+      browser: Browser,
+      interruptedByCaptcha: boolean
+    ) {
+      try {
+        const pages = await browser.pages();
+
+        for (const [index, page] of pages.entries()) {
+          if (
+            shouldInterruptByCaptcha(interruptedByCaptcha, index, pages.length)
+          ) {
+            continue;
+          } else if (pages.length <= 2) {
+            break;
+          }
+
+          const cheapestFlightPrice = await getCheapestFlightPrice(page);
+          if (
+            cheapestFlightPrice !== null &&
+            cheapestFlightPrice !== undefined
+          ) {
+            const cheapestFlightPriceObj = createPriceObject(
+              cheapestFlightPrice,
+              page.url()
+            );
+            cheapestFlightPrices.push(cheapestFlightPriceObj);
+          }
+        }
+
+        console.log("\nAdded cheapest prices.");
+        cheapestFlightPrices.sort((a, b) => a.price - b.price);
+
+        await sendCheapestPricesEmail(cheapestFlightPrices);
+        cheapestFlightPrices.length = 0;
+      } catch (error) {
+        console.error("There has been an error.", error);
+      }
+    }
+
+    async function findCombinationsForCheapestPrice(
+      cheapestPrice: CheapestFlightPrice,
+      browser: Browser
+    ) {
+      for (const dateCombination of generateDateCombinations(saturdayIso)) {
+        const airportRotation = urlsToOpen.find(
+          (url) => url.url === cheapestPrice.url
+        ).airportRotation;
+        const midpoints = airportRotation.split("-");
+        const firstMidpoint = midpoints[0];
+        const secondMidpoint = midpoints[1];
+
+        const url = `https://www.kayak.ie/flights/BEG,TSR,KVO-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-BEG,TSR,KVO/${dateCombination.returnDate}?fs=sort=bestflight_a;baditin=baditin;virtualinterline=-virtualinterline;eqmodel=~${aircraftModel}`;
+
+        await delay(Math.floor(Math.random() * 7500 + 7500));
+
+        try {
+          const page = await openPage(browser, url, getRandomUserAgent());
+          console.log(`Opened URL at: ${url}.`);
+
+          await acceptCookies(page);
+          if (
+            (await page.$eval("html", (page) => page.innerHTML)).includes(
+              "expired"
+            )
+          )
+            await page.reload();
+          await simulateMouseMovement(page);
+          await handleDateCombinationsCaptcha(browser, page, cheapestPrice);
+        } catch (error) {
+          console.error(`Error processing URL ${url}:`, error);
+        }
+      }
+      console.log("Opened the whole batch. Obtaining prices...");
+
+      await reloadPages(browser);
+      await addCheapestPrices(browser, false);
+      await closePages(browser);
+
+      console.log("Closing the current batch.");
     }
 
     function shouldInterruptByCaptcha(
@@ -814,7 +1036,7 @@ async function main() {
       console.log("Opened the whole batch. Obtaining prices...");
 
       await reloadPages(browser);
-      await addCheapestPrice(browser, cheapestFlightPrices, false);
+      await addCheapestPricesForSingleLegs(browser, false);
       await closePages(browser);
 
       console.log("Closing the current batch.");
@@ -834,11 +1056,7 @@ async function main() {
         await delay(Math.floor(Math.random() * 7500 + 7500));
 
       try {
-        const page = await openPage(
-          browser,
-          url,
-          userAgents[Math.floor(Math.random() * userAgents.length)].useragent
-        );
+        const page = await openPage(browser, url, getRandomUserAgent());
         console.log(`Opened URL at: ${url}.`);
 
         if (batchIndex === 0) await acceptCookies(page);
@@ -898,10 +1116,70 @@ async function main() {
     function updateDateAndRestart() {
       saturday.setDate(saturday.getDate() + 7);
       saturdayIso = saturday.toISOString().substring(0, 10);
-      prepareUrls().then(() => openTabs(urlsToOpen));
+      prepareUrls().then(() => openTabs(urlsToOpen.map((url) => url.url)));
     }
 
-    await prepareUrls().then(() => openTabs(urlsToOpen));
+    function isNewSmallestPrice(price: number): boolean {
+      return (
+        smallestValueForSingleLegsFoundInSingleBatch === undefined ||
+        price < smallestValueForSingleLegsFoundInSingleBatch
+      );
+    }
+
+    function generateTableRows(items: CheapestFlightPrice[]) {
+      return items.map(
+        (item) => `
+        <tr>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
+              item.date
+            ).toLocaleDateString("sr")}</td>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
+              item.price
+            }</td>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
+                <a href="${item.url}" target="_blank">${item.url}</a>
+            </td>
+        </tr>
+    `
+      );
+    }
+
+    async function sendCheapestPricesEmail(
+      cheapestPrices: CheapestFlightPrice[]
+    ) {
+      console.log(
+        "Here's all the combinations found for the cheapest single leg price available so far. Sending it to you mail right away!"
+      );
+
+      await sendMail(
+        "milosjeknic@hotmail.rs",
+        `Hooray! New cheapest prices found.`,
+        `<!DOCTYPE html>
+          <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+            </head>
+            <body>
+                <p>Hey there! These are the cheapest prices that I've managed to find so far. Check it out.</p>
+                <h2>Price Overview</h2>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background-color: #f2f2f2;">
+                            <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
+                            <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
+                            <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${generateTableRows(cheapestPrices)}
+                    </tbody>
+                </table>
+            </body>
+          </html>`
+      );
+    }
+
+    await prepareUrls().then(() => openTabs(urlsToOpen.map((url) => url.url)));
   } catch (error) {
     console.error("An error occured in the main function.", error);
   }
