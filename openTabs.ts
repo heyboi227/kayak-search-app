@@ -765,7 +765,8 @@ async function main() {
     async function handleDateCombinationsCaptcha(
       browser: Browser,
       page: Page,
-      cheapestFlightPrice: CheapestFlightPrice
+      cheapestFlightPrice: CheapestFlightPrice,
+      startIndex: number
     ) {
       if (await isCaptchaPage(page.url())) {
         const pages = await browser.pages();
@@ -781,7 +782,6 @@ async function main() {
           index++;
         }
 
-        await addCheapestPricesForSingleLegs(browser, true);
         await addCheapestPrices(browser, true);
 
         await browser.close();
@@ -800,8 +800,12 @@ async function main() {
         await waitForCaptchaSolution(newPage);
 
         await browser.close();
-        await launchBrowser(true);
-        await findCombinationsForCheapestPrice(cheapestFlightPrice, browser);
+        browser = await launchBrowser(true);
+        await findCombinationsForCheapestPrice(
+          cheapestFlightPrice,
+          browser,
+          startIndex
+        );
       }
     }
 
@@ -928,9 +932,6 @@ async function main() {
 
         console.log("\nAdded cheapest prices.");
         cheapestFlightPrices.sort((a, b) => a.price - b.price);
-
-        await sendCheapestPricesEmail(cheapestFlightPrices);
-        cheapestFlightPrices.length = 0;
       } catch (error) {
         console.error("There has been an error.", error);
       }
@@ -938,9 +939,11 @@ async function main() {
 
     async function findCombinationsForCheapestPrice(
       cheapestPrice: CheapestFlightPrice,
-      browser: Browser
+      browser: Browser,
+      startIndex: number = 0
     ) {
-      for (const dateCombination of generateDateCombinations(saturdayIso)) {
+      const dateCombinations = generateDateCombinations(saturdayIso);
+      for (const dateCombination of dateCombinations.slice(startIndex)) {
         const airportRotation = urlsToOpen.find(
           (url) => url.url === cheapestPrice.url
         ).airportRotation;
@@ -964,7 +967,12 @@ async function main() {
           )
             await page.reload();
           await simulateMouseMovement(page);
-          await handleDateCombinationsCaptcha(browser, page, cheapestPrice);
+          await handleDateCombinationsCaptcha(
+            browser,
+            page,
+            cheapestPrice,
+            dateCombinations.indexOf(dateCombination)
+          );
         } catch (error) {
           console.error(`Error processing URL ${url}:`, error);
         }
@@ -976,6 +984,9 @@ async function main() {
       await closePages(browser);
 
       console.log("Closing the current batch.");
+
+      await sendCheapestPricesEmail(cheapestFlightPrices);
+      cheapestFlightPrices.length = 0;
     }
 
     function shouldInterruptByCaptcha(
