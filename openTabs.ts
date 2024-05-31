@@ -23,9 +23,6 @@ async function main() {
     let smallestValueForSingleLegsFoundInSingleBatch: number | undefined =
       undefined;
 
-    let smallestValueFoundGlobally: number | undefined = undefined;
-    let smallestValueFoundInSingleBatch: number | undefined = undefined;
-
     const restrictedAirportCodes: string[] = [
       "AAO",
       "AAQ",
@@ -690,7 +687,7 @@ async function main() {
       aircraftModel: string
     ) {
       return {
-        url: `https://www.kayak.ie/flights/${originAndDestination}/${saturdayIso}-flexible-1day?sort=price_a&fs=eqmodel=~${aircraftModel};stops=~0`,
+        url: `https://www.kayak.ie/flights/${originAndDestination}/${saturdayIso}-flexible-1day?fs=eqmodel=~${aircraftModel};stops=~0&sort=price_a`,
         airportRotation: originAndDestination,
       };
     }
@@ -951,7 +948,7 @@ async function main() {
         const firstMidpoint = midpoints[0];
         const secondMidpoint = midpoints[1];
 
-        const url = `https://www.kayak.ie/flights/BEG,TSR,KVO-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-BEG,TSR,KVO/${dateCombination.returnDate}?fs=sort=bestflight_a;baditin=baditin;virtualinterline=-virtualinterline;eqmodel=~${aircraftModel}`;
+        const url = `https://www.kayak.ie/flights/BEG,TSR,KVO-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-BEG,TSR,KVO/${dateCombination.returnDate}?fs=baditin=baditin;virtualinterline=-virtualinterline;eqmodel=~${aircraftModel}&sort=price_a`;
 
         await delay(Math.floor(Math.random() * 7500 + 7500));
 
