@@ -734,7 +734,6 @@ async function main() {
         }
 
         await addCheapestPricesForSingleLegs(browser, true);
-        await addCheapestPrices(browser, true);
 
         await browser.close();
         browser = await launchBrowser(false);
