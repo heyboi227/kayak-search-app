@@ -13,8 +13,9 @@ type FlightDate = {
 };
 
 let cheapestFlightPrices: CheapestFlightPrice[] = [];
+const aircraftModel = "787";
 
-const saturday = new Date("2024-06-08");
+const saturday = new Date("2024-06-22");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 async function main() {
@@ -22,8 +23,6 @@ async function main() {
     const airportRotations: string[] = await loadData("rotations.json");
 
     const restrictedAirportCodes: string[] = restrictedAirports;
-
-    const aircraftModel = "787";
 
     let urlsToOpen: { url: string; airportRotation: string }[] = [];
     await prepareUrls(
@@ -35,27 +34,19 @@ async function main() {
     );
 
     while (true) {
-      // Phase 1: Look for Single Flights
-      let newCheapestPrice = await lookForSingleFlights(urlsToOpen);
-      if (newCheapestPrice) {
-        // Phase 2: Process Date Combinations
-        await processDateCombinations(
-          newCheapestPrice,
-          saturdayIso,
-          aircraftModel
-        );
+      await lookForSingleFlights(urlsToOpen);
 
-        // Phase 3: Resume Looking for Single Flights
-        saturday.setDate(saturday.getDate() + 7);
-        saturdayIso = saturday.toISOString().substring(0, 10);
-        await prepareUrls(
-          airportRotations,
-          restrictedAirportCodes,
-          aircraftModel,
-          saturdayIso,
-          urlsToOpen
-        );
-      }
+      saturday.setDate(saturday.getDate() + 7);
+      saturdayIso = saturday.toISOString().substring(0, 10);
+      await prepareUrls(
+        airportRotations,
+        restrictedAirportCodes,
+        aircraftModel,
+        saturdayIso,
+        urlsToOpen
+      );
+
+      await lookForSingleFlights(urlsToOpen);
     }
   } catch (error) {
     console.error("An error occurred in the main function.", error);
@@ -87,8 +78,8 @@ async function prepareUrls(
 
 async function lookForSingleFlights(
   urlsToOpen: { url: string; airportRotation: string }[]
-): Promise<CheapestFlightPrice | null> {
-  const browser = await launchBrowser(false);
+) {
+  let browser = await launchBrowser(true);
   let cheapestFlightPriceFound: CheapestFlightPrice | null = null;
 
   for (const { url } of urlsToOpen) {
@@ -108,14 +99,18 @@ async function lookForSingleFlights(
         priceObj.price < cheapestFlightPriceFound.price
       ) {
         cheapestFlightPriceFound = priceObj;
+        await browser.close();
+        await processDateCombinations(
+          cheapestFlightPriceFound,
+          saturdayIso,
+          aircraftModel
+        );
+        browser = await launchBrowser(true);
       }
+    } else {
+      await page.close();
     }
-
-    await page.close();
   }
-
-  await browser.close();
-  return cheapestFlightPriceFound;
 }
 
 async function processDateCombinations(
@@ -123,7 +118,7 @@ async function processDateCombinations(
   saturdayIso: string,
   aircraftModel: string
 ) {
-  const browser = await launchBrowser(false);
+  const browser = await launchBrowser(true);
   const dateCombinations = generateDateCombinations(saturdayIso);
   let urlsToOpenForCombinations: string[] = [];
 
@@ -164,6 +159,7 @@ async function processDateCombinations(
     await page.close();
   }
 
+  cheapestFlightPrices.sort((a, b) => a.price - b.price);
   await sendCheapestPricesEmail(cheapestFlightPrices);
   cheapestFlightPrices.length = 0;
 
@@ -233,7 +229,7 @@ async function getCheapestFlightPrice(page: Page) {
   return cheapestFlightPrice;
 }
 
-function createPriceObject(price: string, url: string) {
+function createPriceObject(price: string, url: string): CheapestFlightPrice {
   return {
     date: saturdayIso,
     price: parseFloat(price.substring(1).replace(/,/g, "")),
@@ -316,7 +312,7 @@ async function sendCheapestPricesEmail(cheapestPrices: CheapestFlightPrice[]) {
 
   await sendMail(
     "milosjeknic@hotmail.rs",
-    `Hooray! New cheapest prices found.`,
+    "Hooray! New cheapest prices found.",
     `<!DOCTYPE html>
       <html lang="en">
         <head>
