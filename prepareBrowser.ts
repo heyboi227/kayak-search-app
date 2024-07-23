@@ -18,7 +18,7 @@ export async function openPage(
 ) {
   const page = await browser.newPage();
   await page.setUserAgent(userAgent);
-  page.setDefaultNavigationTimeout(60000);
-  await page.goto(url, { waitUntil: "load", timeout: 60000 });
+  page.setDefaultNavigationTimeout(0);
+  await page.goto(url, { waitUntil: "load", timeout: 0 });
   return page;
 }

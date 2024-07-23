@@ -1,4 +1,4 @@
-import { Page } from "puppeteer-core";
+import { Page, Browser } from "puppeteer-core";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
@@ -15,7 +15,7 @@ type FlightDate = {
 let cheapestFlightPrices: CheapestFlightPrice[] = [];
 const aircraftModel = "787";
 
-const saturday = new Date("2024-06-22");
+const saturday = new Date("2024-07-27");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 async function main() {
@@ -25,6 +25,7 @@ async function main() {
     const restrictedAirportCodes: string[] = restrictedAirports;
 
     let urlsToOpen: { url: string; airportRotation: string }[] = [];
+
     await prepareUrls(
       airportRotations,
       restrictedAirportCodes,
@@ -79,7 +80,13 @@ async function prepareUrls(
 async function lookForSingleFlights(
   urlsToOpen: { url: string; airportRotation: string }[]
 ) {
-  let browser = await launchBrowser(true);
+  let browser: Browser;
+  if (browser) {
+    await browser.close();
+  }
+
+  browser = await launchBrowser(true);
+
   let cheapestFlightPriceFound: CheapestFlightPrice | null = null;
 
   for (const { url } of urlsToOpen) {
@@ -99,13 +106,11 @@ async function lookForSingleFlights(
         priceObj.price < cheapestFlightPriceFound.price
       ) {
         cheapestFlightPriceFound = priceObj;
-        await browser.close();
         await processDateCombinations(
           cheapestFlightPriceFound,
           saturdayIso,
           aircraftModel
         );
-        browser = await launchBrowser(true);
       }
     } else {
       await page.close();
@@ -143,6 +148,7 @@ async function processDateCombinations(
     await delay(Math.floor(Math.random() * 15000 + 45000));
 
     await acceptCookies(page);
+
     if (
       (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
     ) {
@@ -306,36 +312,56 @@ function generateTableRows(items: CheapestFlightPrice[]) {
 }
 
 async function sendCheapestPricesEmail(cheapestPrices: CheapestFlightPrice[]) {
-  console.log(
-    "Here's all the combinations found for the cheapest single leg price available so far. Sending it to you mail right away!"
-  );
+  if (cheapestFlightPrices.length > 0) {
+    console.log(
+      "Here's all the combinations found for the cheapest single leg price available so far. Sending it to you mail right away!"
+    );
 
-  await sendMail(
-    "milosjeknic@hotmail.rs",
-    "Hooray! New cheapest prices found.",
-    `<!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-        </head>
-        <body>
-            <p>Hey there! These are the cheapest prices that I've managed to find so far. Check it out.</p>
-            <h2>Price Overview</h2>
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                    <tr style="background-color: #f2f2f2;">
-                        <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
-                        <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
-                        <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${generateTableRows(cheapestPrices)}
-                </tbody>
-            </table>
-        </body>
-      </html>`
-  );
+    await sendMail(
+      "milosjeknic@hotmail.rs",
+      "Hooray! New cheapest prices found.",
+      `<!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+          </head>
+          <body>
+              <p>Hey there! These are the cheapest prices that I've managed to find so far. Check it out.</p>
+              <h2>Price Overview</h2>
+              <table style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                      <tr style="background-color: #f2f2f2;">
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      ${generateTableRows(cheapestPrices)}
+                  </tbody>
+              </table>
+          </body>
+        </html>`
+    );
+  } else {
+    console.log(
+      "Uh-oh! There doesn't seem to be a single flight available for this date combination. Moving on..."
+    );
+
+    await sendMail(
+      "milosjeknic@hotmail.rs",
+      "Aw! No cheapest prices found.",
+      `<!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+          </head>
+          <body>
+              <p>Unfortunately, i wasn't able to find any prices for ${saturdayIso}. Please try some other date.</p>
+          </body>
+        </html>`
+    );
+  }
 }
 
 main();
