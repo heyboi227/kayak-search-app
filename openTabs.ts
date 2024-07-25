@@ -147,8 +147,6 @@ async function processDateCombinations(
     await acceptCookies(page);
     await delay(Math.floor(Math.random() * 15000 + 45000));
 
-    await acceptCookies(page);
-
     if (
       (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
     ) {
