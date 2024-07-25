@@ -158,8 +158,10 @@ async function processDateCombinations(
   }
 
   cheapestFlightPrices.sort((a, b) => a.price - b.price);
-  await sendCheapestPricesEmail(cheapestFlightPrices);
-  cheapestFlightPrices.length = 0;
+  if (cheapestFlightPrices.length > 0) {
+    await sendCheapestPricesEmail(cheapestFlightPrices);
+    cheapestFlightPrices.length = 0;
+  }
 
   await browser.close();
 }
@@ -304,15 +306,14 @@ function generateTableRows(items: CheapestFlightPrice[]) {
 }
 
 async function sendCheapestPricesEmail(cheapestPrices: CheapestFlightPrice[]) {
-  if (cheapestFlightPrices.length > 0) {
-    console.log(
-      "Here's all the combinations found for the cheapest single leg price available so far. Sending it to you mail right away!"
-    );
+  console.log(
+    "Here's all the combinations found for the cheapest single leg price available so far. Sending it to you mail right away!"
+  );
 
-    await sendMail(
-      "milosjeknic@hotmail.rs",
-      "Hooray! New cheapest prices found.",
-      `<!DOCTYPE html>
+  await sendMail(
+    "milosjeknic@hotmail.rs",
+    "Hooray! New cheapest prices found.",
+    `<!DOCTYPE html>
         <html lang="en">
           <head>
             <meta charset="UTF-8">
@@ -334,26 +335,7 @@ async function sendCheapestPricesEmail(cheapestPrices: CheapestFlightPrice[]) {
               </table>
           </body>
         </html>`
-    );
-  } else {
-    console.log(
-      "Uh-oh! There doesn't seem to be a single flight available for this date combination. Moving on..."
-    );
-
-    await sendMail(
-      "milosjeknic@hotmail.rs",
-      "Aw! No cheapest prices found.",
-      `<!DOCTYPE html>
-        <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-          </head>
-          <body>
-              <p>Unfortunately, i wasn't able to find any prices for ${saturdayIso}. Please try some other date.</p>
-          </body>
-        </html>`
-    );
-  }
+  );
 }
 
 main();
