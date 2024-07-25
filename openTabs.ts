@@ -15,7 +15,7 @@ type FlightDate = {
 let cheapestFlightPrices: CheapestFlightPrice[] = [];
 const aircraftModel = "787";
 
-const saturday = new Date("2024-07-27");
+const saturday = new Date("2024-08-17");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 async function main() {
@@ -87,8 +87,6 @@ async function lookForSingleFlights(
 
   browser = await launchBrowser(true);
 
-  let cheapestFlightPriceFound: CheapestFlightPrice | null = null;
-
   for (const { url } of urlsToOpen) {
     const page = await openPage(browser, url, getRandomUserAgent());
     console.log(`Opened URL at: ${url}.`);
@@ -99,19 +97,15 @@ async function lookForSingleFlights(
 
     const cheapestFlightPrice = await getCheapestFlightPrice(page);
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-      const priceObj = createPriceObject(cheapestFlightPrice, url);
+      const cheapestFlightPriceFoundUrl = page.url();
 
-      if (
-        !cheapestFlightPriceFound ||
-        priceObj.price < cheapestFlightPriceFound.price
-      ) {
-        cheapestFlightPriceFound = priceObj;
-        await processDateCombinations(
-          cheapestFlightPriceFound,
-          saturdayIso,
-          aircraftModel
-        );
-      }
+      await processDateCombinations(
+        cheapestFlightPriceFoundUrl,
+        saturdayIso,
+        aircraftModel
+      );
+
+      await page.close();
     } else {
       await page.close();
     }
@@ -119,7 +113,7 @@ async function lookForSingleFlights(
 }
 
 async function processDateCombinations(
-  cheapestPrice: CheapestFlightPrice,
+  singleFlightCheapestPriceUrl: string,
   saturdayIso: string,
   aircraftModel: string
 ) {
@@ -128,7 +122,7 @@ async function processDateCombinations(
   let urlsToOpenForCombinations: string[] = [];
 
   for (const dateCombination of dateCombinations) {
-    const airportRotation = cheapestPrice.url
+    const airportRotation = singleFlightCheapestPriceUrl
       .split("/flights/")[1]
       .split("/")[0];
     const midpoints = airportRotation.split("-");
