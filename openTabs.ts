@@ -13,6 +13,7 @@ type FlightDate = {
 };
 
 let cheapestFlightPrices: CheapestFlightPrice[] = [];
+let cheapestFlightPriceFoundUrl: string = "";
 const aircraftModel = "787";
 
 const saturday = new Date("2024-08-17");
@@ -78,7 +79,8 @@ async function prepareUrls(
 }
 
 async function lookForSingleFlights(
-  urlsToOpen: { url: string; airportRotation: string }[]
+  urlsToOpen: { url: string; airportRotation: string }[],
+  startIndex: number = 0
 ) {
   let browser: Browser;
   if (browser) {
@@ -87,17 +89,18 @@ async function lookForSingleFlights(
 
   browser = await launchBrowser(true);
 
-  for (const { url } of urlsToOpen) {
-    const page = await openPage(browser, url, getRandomUserAgent());
-    console.log(`Opened URL at: ${url}.`);
+  for (const url of urlsToOpen.slice(startIndex)) {
+    const page = await openPage(browser, url.url, getRandomUserAgent());
+    console.log(`Opened URL at: ${url.url}.`);
 
+    await handleCaptcha(browser, page, urlsToOpen);
     await delay(500);
     await acceptCookies(page);
     await delay(Math.floor(Math.random() * 15000 + 45000));
 
     const cheapestFlightPrice = await getCheapestFlightPrice(page);
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-      const cheapestFlightPriceFoundUrl = page.url();
+      cheapestFlightPriceFoundUrl = url.url;
 
       await processDateCombinations(
         cheapestFlightPriceFoundUrl,
@@ -115,7 +118,8 @@ async function lookForSingleFlights(
 async function processDateCombinations(
   singleFlightCheapestPriceUrl: string,
   saturdayIso: string,
-  aircraftModel: string
+  aircraftModel: string,
+  startIndex: number = 0
 ) {
   const browser = await launchBrowser(true);
   const dateCombinations = generateDateCombinations(saturdayIso);
@@ -133,10 +137,15 @@ async function processDateCombinations(
     urlsToOpenForCombinations.push(url);
   }
 
-  for (const url of urlsToOpenForCombinations) {
+  for (const url of urlsToOpenForCombinations.slice(startIndex)) {
     const page = await openPage(browser, url, getRandomUserAgent());
     console.log(`Opened URL at: ${url}.`);
 
+    await handleDateCombinationsCaptcha(
+      browser,
+      page,
+      urlsToOpenForCombinations.indexOf(url)
+    );
     await delay(500);
     await acceptCookies(page);
     await delay(Math.floor(Math.random() * 15000 + 45000));
@@ -164,6 +173,107 @@ async function processDateCombinations(
   }
 
   await browser.close();
+}
+
+async function notifyCaptchaNeeded() {
+  sendMail(
+    "milosjeknic@hotmail.rs",
+    "CAPTCHA solving needed",
+    "This might not be your lucky day. You will need to solve the CAPTCHA to proceed."
+  );
+  console.log("Oops, there seems to be a CAPTCHA here. Try to solve it.");
+}
+
+async function waitForCaptchaSolution(page: Page) {
+  await page.waitForFunction(
+    () =>
+      !document.URL.includes("security/check") &&
+      !document.URL.includes("sitecaptcha"),
+    { timeout: 0 }
+  );
+}
+
+async function isCaptchaPage(url: string) {
+  return url.includes("security/check") || url.includes("sitecaptcha");
+}
+
+async function handleCaptcha(
+  browser: Browser,
+  page: Page,
+  urlsToOpen: { url: string; airportRotation: string }[]
+) {
+  if (await isCaptchaPage(page.url())) {
+    const pages = await browser.pages();
+    for (const page of pages) {
+      let index: number = 0;
+      if ((index === 0 || index === pages.length - 1) && pages.length > 2) {
+        continue;
+      } else if (pages.length <= 2) {
+        break;
+      }
+
+      await page.reload();
+      index++;
+    }
+
+    await browser.close();
+    browser = await launchBrowser(false);
+
+    const newPage = await openPage(browser, page.url(), getRandomUserAgent());
+
+    await delay(3500);
+    await acceptCookies(newPage);
+
+    await notifyCaptchaNeeded();
+    await waitForCaptchaSolution(newPage);
+
+    await browser.close();
+    await lookForSingleFlights(
+      urlsToOpen,
+      urlsToOpen.findIndex((url) => url.url === page.url())
+    );
+  }
+}
+
+async function handleDateCombinationsCaptcha(
+  browser: Browser,
+  page: Page,
+  urlIndex: number
+) {
+  if (await isCaptchaPage(page.url())) {
+    const pages = await browser.pages();
+    for (const page of pages) {
+      let index: number = 0;
+      if ((index === 0 || index === pages.length - 1) && pages.length > 2) {
+        continue;
+      } else if (pages.length <= 2) {
+        break;
+      }
+
+      await page.reload();
+      index++;
+    }
+
+    await browser.close();
+    browser = await launchBrowser(false);
+
+    const newPage = await openPage(browser, page.url(), getRandomUserAgent());
+
+    await delay(3500);
+    await acceptCookies(newPage);
+
+    await notifyCaptchaNeeded();
+    await waitForCaptchaSolution(newPage);
+
+    await browser.close();
+    browser = await launchBrowser(true);
+    await processDateCombinations(
+      cheapestFlightPriceFoundUrl,
+      saturdayIso,
+      aircraftModel,
+      urlIndex
+    );
+  }
 }
 
 function generateDateCombinations(inputDate: string): FlightDate[] {
