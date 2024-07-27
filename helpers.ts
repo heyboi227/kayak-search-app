@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { userAgents } from "./userAgents";
 
 export async function saveData(data: any, filename: string): Promise<void> {
   const filePath = path.resolve(__dirname, filename);
@@ -21,10 +20,6 @@ export async function loadData(filename: string): Promise<any> {
     console.error(`Error loading file ${filePath}:`, error);
     throw error;
   }
-}
-
-export function getRandomUserAgent() {
-  return userAgents[Math.floor(Math.random() * userAgents.length)].useragent;
 }
 
 export function delay(time: number) {

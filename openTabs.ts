@@ -2,8 +2,9 @@ import { Page, Browser } from "puppeteer-core";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
-import { delay, getRandomUserAgent, loadData } from "./helpers";
+import { delay, loadData } from "./helpers";
 import { restrictedAirports } from "./restrictedAirports";
+import UserAgent from "user-agents";
 
 type CheapestFlightPrice = { date: string; price: number; url: string };
 type FlightDate = {
@@ -82,21 +83,27 @@ async function lookForSingleFlights(
   urlsToOpen: { url: string; airportRotation: string }[],
   startIndex: number = 0
 ) {
-  let browser: Browser;
-  if (browser) {
-    await browser.close();
-  }
-
-  browser = await launchBrowser(true);
+  const browser = await launchBrowser(true);
 
   for (const url of urlsToOpen.slice(startIndex)) {
-    const page = await openPage(browser, url.url, getRandomUserAgent());
+    const page = await openPage(browser, url.url, new UserAgent().toString());
     console.log(`Opened URL at: ${url.url}.`);
 
-    await handleCaptcha(browser, page, urlsToOpen);
+    await handleCaptcha(browser, page, urlsToOpen, urlsToOpen.indexOf(url));
+
+    const cookies = await page.cookies();
+    await page.setCookie(...cookies);
+
     await delay(500);
     await acceptCookies(page);
     await delay(Math.floor(Math.random() * 15000 + 45000));
+
+    if (
+      (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+    ) {
+      await page.reload();
+    }
+    await simulateMouseMovement(page);
 
     const cheapestFlightPrice = await getCheapestFlightPrice(page);
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
@@ -138,7 +145,7 @@ async function processDateCombinations(
   }
 
   for (const url of urlsToOpenForCombinations.slice(startIndex)) {
-    const page = await openPage(browser, url, getRandomUserAgent());
+    const page = await openPage(browser, url, new UserAgent().toString());
     console.log(`Opened URL at: ${url}.`);
 
     await handleDateCombinationsCaptcha(
@@ -146,6 +153,10 @@ async function processDateCombinations(
       page,
       urlsToOpenForCombinations.indexOf(url)
     );
+
+    const cookies = await page.cookies();
+    await page.setCookie(...cookies);
+
     await delay(500);
     await acceptCookies(page);
     await delay(Math.floor(Math.random() * 15000 + 45000));
@@ -200,7 +211,8 @@ async function isCaptchaPage(url: string) {
 async function handleCaptcha(
   browser: Browser,
   page: Page,
-  urlsToOpen: { url: string; airportRotation: string }[]
+  urlsToOpen: { url: string; airportRotation: string }[],
+  urlIndex: number
 ) {
   if (await isCaptchaPage(page.url())) {
     const pages = await browser.pages();
@@ -216,10 +228,13 @@ async function handleCaptcha(
       index++;
     }
 
-    await browser.close();
     browser = await launchBrowser(false);
 
-    const newPage = await openPage(browser, page.url(), getRandomUserAgent());
+    const newPage = await openPage(
+      browser,
+      page.url(),
+      new UserAgent().toString()
+    );
 
     await delay(3500);
     await acceptCookies(newPage);
@@ -228,10 +243,7 @@ async function handleCaptcha(
     await waitForCaptchaSolution(newPage);
 
     await browser.close();
-    await lookForSingleFlights(
-      urlsToOpen,
-      urlsToOpen.findIndex((url) => url.url === page.url())
-    );
+    await lookForSingleFlights(urlsToOpen, urlIndex);
   }
 }
 
@@ -254,10 +266,13 @@ async function handleDateCombinationsCaptcha(
       index++;
     }
 
-    await browser.close();
     browser = await launchBrowser(false);
 
-    const newPage = await openPage(browser, page.url(), getRandomUserAgent());
+    const newPage = await openPage(
+      browser,
+      page.url(),
+      new UserAgent().toString()
+    );
 
     await delay(3500);
     await acceptCookies(newPage);
@@ -266,7 +281,6 @@ async function handleDateCombinationsCaptcha(
     await waitForCaptchaSolution(newPage);
 
     await browser.close();
-    browser = await launchBrowser(true);
     await processDateCombinations(
       cheapestFlightPriceFoundUrl,
       saturdayIso,
@@ -365,6 +379,10 @@ async function simulateMouseMovement(page: Page) {
   await page.mouse.move(
     Math.floor(Math.random() * 200 + 200),
     Math.floor(Math.random() * 200 + 200)
+  );
+  await page.mouse.move(
+    Math.floor(Math.random() * 300 + 300),
+    Math.floor(Math.random() * 300 + 300)
   );
 }
 
