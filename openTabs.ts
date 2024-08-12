@@ -17,7 +17,7 @@ let cheapestFlightPrices: CheapestFlightPrice[] = [];
 let cheapestFlightPriceFoundUrl: string = "";
 const aircraftModel = "787";
 
-const saturday = new Date("2024-08-17");
+const saturday = new Date("2024-08-31");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 async function main() {
@@ -110,6 +110,7 @@ async function lookForSingleFlights(
       cheapestFlightPriceFoundUrl = url.url;
 
       await processDateCombinations(
+        browser,
         cheapestFlightPriceFoundUrl,
         saturdayIso,
         aircraftModel
@@ -123,12 +124,12 @@ async function lookForSingleFlights(
 }
 
 async function processDateCombinations(
+  browser: Browser,
   singleFlightCheapestPriceUrl: string,
   saturdayIso: string,
   aircraftModel: string,
   startIndex: number = 0
 ) {
-  const browser = await launchBrowser(true);
   const dateCombinations = generateDateCombinations(saturdayIso);
   let urlsToOpenForCombinations: string[] = [];
 
@@ -182,8 +183,6 @@ async function processDateCombinations(
     await sendCheapestPricesEmail(cheapestFlightPrices);
     cheapestFlightPrices.length = 0;
   }
-
-  await browser.close();
 }
 
 async function notifyCaptchaNeeded() {
@@ -281,7 +280,10 @@ async function handleDateCombinationsCaptcha(
     await waitForCaptchaSolution(newPage);
 
     await browser.close();
+
+    browser = await launchBrowser(true);
     await processDateCombinations(
+      browser,
       cheapestFlightPriceFoundUrl,
       saturdayIso,
       aircraftModel,
