@@ -178,8 +178,8 @@ async function processDateCombinations(
     await page.close();
   }
 
-  cheapestFlightPrices.sort((a, b) => a.price - b.price);
   if (cheapestFlightPrices.length > 0) {
+    cheapestFlightPrices.sort((a, b) => a.price - b.price);
     await sendCheapestPricesEmail(cheapestFlightPrices);
     cheapestFlightPrices.length = 0;
   }
