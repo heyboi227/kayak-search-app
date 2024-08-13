@@ -337,7 +337,7 @@ async function getCheapestFlightPrice(page: Page) {
 
   try {
     cheapestFlightPrice = await page.$eval(
-      ".Hv20-value:nth-child(1) > div > span:nth-child(1)",
+      ".Hv20-value > div > span:nth-child(1)",
       (el) => el.innerHTML
     );
   } catch (error) {
