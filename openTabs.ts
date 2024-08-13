@@ -337,19 +337,11 @@ async function getCheapestFlightPrice(page: Page) {
 
   try {
     cheapestFlightPrice = await page.$eval(
-      "#listWrapper > div > div.Hv20 > div:nth-child(1) > div > div.Hv20-value > div > span:nth-child(1)",
+      "div.Hv20-value > div > span:nth-child(1)",
       (el) => el.innerHTML
     );
   } catch (error) {
-    console.log("First selector failed, trying second selector...");
-    try {
-      cheapestFlightPrice = await page.$eval(
-        "#listWrapper > div > div.Hv20 > div.Hv20-option.Hv20-mod-state-active > div > div.Hv20-value > div > span:nth-child(1)",
-        (el) => el.innerHTML
-      );
-    } catch (secondError) {
-      console.log("Second selector also failed. No price found. Moving on...");
-    }
+    console.log("Selector failed. No price found. Moving on...");
   }
 
   return cheapestFlightPrice;
