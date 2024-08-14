@@ -338,7 +338,7 @@ async function getCheapestFlightPrice(page: Page) {
   try {
     cheapestFlightPrice = await page.$eval(
       ".Hv20-value > div > span:nth-child(1)",
-      (el) => el.innerHTML
+      (el) => el.textContent
     );
   } catch (error) {
     console.log("Selector failed. No price found. Moving on...");
@@ -350,7 +350,7 @@ async function getCheapestFlightPrice(page: Page) {
 function createPriceObject(price: string, url: string): CheapestFlightPrice {
   return {
     date: saturdayIso,
-    price: parseFloat(price.substring(1).replace(/,/g, "")),
+    price: parseFloat(price.replace(/\D/g, "")),
     url: url,
   };
 }
