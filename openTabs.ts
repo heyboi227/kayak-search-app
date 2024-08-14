@@ -4,7 +4,6 @@ import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
 import { delay, loadData } from "./helpers";
 import { restrictedAirports } from "./restrictedAirports";
-import UserAgent from "user-agents";
 
 type CheapestFlightPrice = { date: string; price: number; url: string };
 type FlightDate = {
@@ -86,7 +85,7 @@ async function lookForSingleFlights(
   const browser = await launchBrowser(true);
 
   for (const url of urlsToOpen.slice(startIndex)) {
-    const page = await openPage(browser, url.url, new UserAgent().toString());
+    const page = await openPage(browser, url.url);
     console.log(`Opened URL at: ${url.url}.`);
 
     await handleCaptcha(browser, page, urlsToOpen, urlsToOpen.indexOf(url));
@@ -146,7 +145,7 @@ async function processDateCombinations(
   }
 
   for (const url of urlsToOpenForCombinations.slice(startIndex)) {
-    const page = await openPage(browser, url, new UserAgent().toString());
+    const page = await openPage(browser, url);
     console.log(`Opened URL at: ${url}.`);
 
     await handleDateCombinationsCaptcha(
@@ -229,11 +228,7 @@ async function handleCaptcha(
 
     browser = await launchBrowser(false);
 
-    const newPage = await openPage(
-      browser,
-      page.url(),
-      new UserAgent().toString()
-    );
+    const newPage = await openPage(browser, page.url());
 
     await delay(3500);
     await acceptCookies(newPage);
@@ -267,11 +262,7 @@ async function handleDateCombinationsCaptcha(
 
     browser = await launchBrowser(false);
 
-    const newPage = await openPage(
-      browser,
-      page.url(),
-      new UserAgent().toString()
-    );
+    const newPage = await openPage(browser, page.url());
 
     await delay(3500);
     await acceptCookies(newPage);
