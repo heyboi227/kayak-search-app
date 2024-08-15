@@ -4,7 +4,7 @@
     "lodash": "^4.17.21",
     "lowdb": "^7.0.1",
     "nodemailer": "^6.9.14",
-    "puppeteer-core": "^23.0.2"
+    "puppeteer-core": "^23.1.0"
   },
   "name": "kayak-search",
   "version": "1.0.0",
