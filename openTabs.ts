@@ -20,6 +20,9 @@ const aircraftModel = "787";
 const saturday = new Date("2024-08-31");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
+const userAgent = new UserAgent({deviceCategory: "desktop"});
+const userAgents = Array(1000).fill(undefined).map(() => userAgent.random());
+
 async function main() {
   try {
     const airportRotations: string[] = await loadData("rotations.json");
@@ -86,7 +89,11 @@ async function lookForSingleFlights(
   const browser = await launchBrowser(true);
 
   for (const url of urlsToOpen.slice(startIndex)) {
-    const page = await openPage(browser, url.url, new UserAgent().toString());
+    const page = await openPage(
+      browser,
+      url.url,
+      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+    );
     console.log(`Opened URL at: ${url.url}.`);
 
     await handleCaptcha(browser, page, urlsToOpen, urlsToOpen.indexOf(url));
@@ -146,7 +153,11 @@ async function processDateCombinations(
   }
 
   for (const url of urlsToOpenForCombinations.slice(startIndex)) {
-    const page = await openPage(browser, url, new UserAgent().toString());
+    const page = await openPage(
+      browser,
+      url,
+      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+    );
     console.log(`Opened URL at: ${url}.`);
 
     await handleDateCombinationsCaptcha(
@@ -232,7 +243,7 @@ async function handleCaptcha(
     const newPage = await openPage(
       browser,
       page.url(),
-      new UserAgent().toString()
+      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
     );
 
     await delay(3500);
@@ -270,7 +281,7 @@ async function handleDateCombinationsCaptcha(
     const newPage = await openPage(
       browser,
       page.url(),
-      new UserAgent().toString()
+      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
     );
 
     await delay(3500);
