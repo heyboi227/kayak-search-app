@@ -21,7 +21,7 @@ const saturday = new Date("2024-08-31");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 const userAgent = new UserAgent({deviceCategory: "desktop"});
-const userAgents = Array(1000).fill(undefined).map(() => userAgent.random());
+const userAgents = Array(100000).fill(undefined).map(() => userAgent.random());
 
 async function main() {
   try {
