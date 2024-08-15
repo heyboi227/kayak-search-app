@@ -4,6 +4,7 @@ import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
 import { delay, loadData } from "./helpers";
 import { restrictedAirports } from "./restrictedAirports";
+import UserAgent from "user-agents";
 
 type CheapestFlightPrice = { date: string; price: number; url: string };
 type FlightDate = {

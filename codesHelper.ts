@@ -2,6 +2,7 @@ import { delay, saveData } from "./helpers";
 import { launchBrowser, openPage } from "./prepareBrowser";
 import { Browser, ElementHandle, Page } from "puppeteer-core";
 import { aircraftMappings } from "./aircraftMappings";
+import UserAgent from "user-agents";
 
 async function obtainRotations() {
   const airportRotations: string[] = [];
@@ -53,7 +54,7 @@ async function obtainRotations() {
 
       await page.close();
       await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
-      page = await openPage(browser, page.url());
+      page = await openPage(browser, page.url(), new UserAgent().toString());
     }
   }
 
@@ -78,7 +79,11 @@ async function obtainRotations() {
     aircraftType: string
   ) {
     console.log(`Opening data for ${link.aircraftReg}.`);
-    let detailPage = await openPage(browser, link.link);
+    let detailPage = await openPage(
+      browser,
+      link.link,
+      new UserAgent().toString()
+    );
 
     detailPage = await waitForVerification(browser, detailPage);
 
@@ -97,7 +102,7 @@ async function obtainRotations() {
     url: string,
     aircraftTypeICAO: string
   ): Promise<boolean> {
-    let page = await openPage(browser, url);
+    let page = await openPage(browser, url, new UserAgent().toString());
 
     page = await waitForVerification(browser, page);
 
@@ -218,7 +223,8 @@ async function obtainRotations() {
     try {
       const page = await openPage(
         browser,
-        `https://www.flightradar24.com/data/aircraft/${aircraftType}`
+        `https://www.flightradar24.com/data/aircraft/${aircraftType}`,
+        new UserAgent().toString()
       );
 
       console.log(`Opened page at ${page.url()}`);
