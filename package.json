@@ -3,7 +3,7 @@
     "@types/lowdb": "^1.0.15",
     "lodash": "^4.17.21",
     "lowdb": "^7.0.1",
-    "nodemailer": "^6.9.14",
+    "nodemailer": "^6.9.15",
     "puppeteer-core": "^23.2.1",
     "user-agents": "^1.1.314"
   },
