@@ -20,8 +20,10 @@ const aircraftModel = "787";
 const saturday = new Date("2024-08-31");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
-const userAgent = new UserAgent({deviceCategory: "desktop"});
-const userAgents = Array(100000).fill(undefined).map(() => userAgent.random());
+const userAgent = new UserAgent({ deviceCategory: "desktop" });
+const userAgents = Array(100000)
+  .fill(undefined)
+  .map(() => userAgent.random());
 
 async function main() {
   try {
@@ -103,14 +105,32 @@ async function lookForSingleFlights(
 
     await delay(500);
     await acceptCookies(page);
-    await delay(Math.floor(Math.random() * 15000 + 45000));
 
     if (
       (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
     ) {
       await page.reload();
     }
-    await simulateMouseMovement(page);
+
+    const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
+    if (Math.random() > 0.5) {
+      await page.goBack();
+      await delay(2000);
+      await page.goForward();
+    }
+
+    if (Math.random() > 0.5) {
+      await simulateMouseMovement(page);
+    }
+
+    if (Math.random() > 0.5) {
+      const newPage = await browser.newPage();
+      await newPage.goto("https://www.google.com");
+      await delay(Math.random() * 5000 + 2000);
+      await newPage.close();
+    }
+
+    await delayPromise;
 
     const cheapestFlightPrice = await getCheapestFlightPrice(page);
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
@@ -171,14 +191,33 @@ async function processDateCombinations(
 
     await delay(500);
     await acceptCookies(page);
-    await delay(Math.floor(Math.random() * 15000 + 45000));
+    await delay(Math.floor(Math.random() * 30000 + 90000));
 
     if (
       (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
     ) {
       await page.reload();
     }
-    await simulateMouseMovement(page);
+
+    const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
+    if (Math.random() > 0.5) {
+      await page.goBack();
+      await delay(2000);
+      await page.goForward();
+    }
+
+    if (Math.random() > 0.5) {
+      await simulateMouseMovement(page);
+    }
+
+    if (Math.random() > 0.5) {
+      const newPage = await browser.newPage();
+      await newPage.goto("https://www.google.com");
+      await delay(Math.random() * 5000 + 2000);
+      await newPage.close();
+    }
+
+    await delayPromise;
 
     const cheapestFlightPrice = await getCheapestFlightPrice(page);
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
