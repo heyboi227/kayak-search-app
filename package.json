@@ -5,7 +5,7 @@
     "lowdb": "^7.0.1",
     "nodemailer": "^6.9.16",
     "puppeteer-core": "^23.6.1",
-    "user-agents": "^1.1.343"
+    "user-agents": "^1.1.344"
   },
   "name": "kayak-search",
   "version": "1.0.0",
