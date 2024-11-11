@@ -97,17 +97,17 @@ async function obtainRotations() {
     }
   }
 
-  async function checkIfAirportsShouldBeAdded(
+  async function checkAircraftFrequency(
     browser: Browser,
     url: string,
     aircraftTypeICAO: string
-  ): Promise<boolean> {
+  ): Promise<{ aircraftFrequency: number; isAircraftFrequent: boolean }> {
     let page = await openPage(browser, url, new UserAgent().toString());
 
     page = await waitForVerification(browser, page);
 
     const detailTable = await page.$("#tbl-datatable");
-    if (!detailTable) return false;
+    if (!detailTable) return null;
 
     const detailRows = await detailTable.$$("tbody > tr");
     const aircraftOperating: string[] = [];
@@ -139,7 +139,10 @@ async function obtainRotations() {
 
     const percentage = (count / aircraftOperating.length) * 100;
 
-    return percentage >= 50;
+    return {
+      aircraftFrequency: percentage,
+      isAircraftFrequent: percentage >= 50,
+    };
   }
 
   async function extractAirportRotations(
@@ -150,7 +153,10 @@ async function obtainRotations() {
     const processedRotations = new Set<string>();
 
     const detailTable = await page.$("#tbl-datatable");
-    if (!detailTable) return;
+    if (!detailTable) {
+      console.log("No rotation data available for this aircraft.");
+      return;
+    }
 
     const detailRows = await detailTable.$$("tbody > tr");
 
@@ -185,25 +191,51 @@ async function obtainRotations() {
             const destinationCode = destinationCellText.slice(-4, -1);
             const flightLink = await getCellLink(flightLinkCell);
 
-            const shouldAddAirports = await checkIfAirportsShouldBeAdded(
+            const aircraftFrequency = await checkAircraftFrequency(
               browser,
               flightLink,
               aircraftType
             );
 
-            if (shouldAddAirports) {
-              const rotation = `${originCode}-${destinationCode}`;
+            const rotation = `${originCode}-${destinationCode}`;
 
+            console.log(`Checking out rotation: ${rotation}.`);
+
+            if (aircraftFrequency.isAircraftFrequent) {
               if (!processedRotations.has(rotation)) {
                 airportRotations.push(rotation);
                 processedRotations.add(rotation);
+
+                console.log(
+                  `This aircraft was in service at ${Math.round(
+                    aircraftFrequency.aircraftFrequency
+                  )}% of the total number of rotations for this flight, in the last week.`
+                );
+                console.log(`Added the rotation.`);
+              } else {
+                console.log("Rotation already added.");
               }
+            } else {
+              console.log(
+                `This aircraft was in service at ${Math.round(
+                  aircraftFrequency.aircraftFrequency
+                )}% of the total number of rotations for this flight, in the last week.`
+              );
+              console.log("Not frequent enough. Skipped the rotation.");
             }
           }
         }
       } catch (error) {
         console.error("Error processing link", error);
       }
+    }
+
+    if (processedRotations.size > 0) {
+      console.log(
+        `Processed ${processedRotations.size} rotations for this aircraft.`
+      );
+    } else {
+      console.log("No aircraft rotations to process.");
     }
   }
 
@@ -268,7 +300,7 @@ async function obtainRotations() {
     }
   }
 
-  retrieveRotationsForAircraftTypes(["B788", "B789", "B78X"]);
+  retrieveRotationsForAircraftTypes(["A359", "A35K"]);
 }
 
 obtainRotations();

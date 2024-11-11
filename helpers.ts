@@ -4,7 +4,7 @@ import path from "path";
 export async function saveData(data: any, filename: string): Promise<void> {
   const filePath = path.resolve(__dirname, filename);
   try {
-    await fs.promises.appendFile(filePath, JSON.stringify(data, null, 2));
+    await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2));
   } catch (error) {
     console.error(`Error saving file ${filePath}:`, error);
     throw error;
