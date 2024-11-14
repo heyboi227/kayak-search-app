@@ -1,4 +1,4 @@
-import { Page, Browser } from "puppeteer-core";
+import { Page, Browser, ElementHandle } from "puppeteer-core";
 import * as nodemailer from "nodemailer";
 import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
@@ -209,7 +209,9 @@ async function lookForSingleFlights(
 
     await delayPromise;
 
-    const cheapestFlightPrice = await getCheapestFlightPrice(page);
+    const cheapestFlightPrice = await getCheapestFlightPriceForSingleFlightLeg(
+      page
+    );
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
       console.log(
         "Prices have been found for this flight. Starting to process date combinations..."
@@ -299,11 +301,15 @@ async function processDateCombinations(
 
     await delayPromise;
 
-    const cheapestFlightPrice = await getCheapestFlightPrice(page);
+    const cheapestFlightPrice = await getCheapestFlightPriceForDateCombinations(
+      page,
+      aircraftModel
+    );
+
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
       const priceObj = createPriceObject(cheapestFlightPrice, url);
       cheapestFlightPrices.push(priceObj);
-      console.log("Added the link.")
+      console.log("Added the link.");
     }
 
     await page.close();
@@ -467,7 +473,7 @@ function generateDateCombinations(inputDate: string): FlightDate[] {
   return combinations;
 }
 
-async function getCheapestFlightPrice(page: Page) {
+async function getCheapestFlightPriceForSingleFlightLeg(page: Page) {
   let cheapestFlightPrice: string = null;
 
   try {
@@ -480,6 +486,58 @@ async function getCheapestFlightPrice(page: Page) {
   }
 
   return cheapestFlightPrice;
+}
+
+async function getCheapestFlightPriceForDateCombinations(
+  page: Page,
+  aircraftType: string
+) {
+  let cheapestFlightPrice: string = null;
+
+  try {
+    await obtainPrice(page, aircraftType, cheapestFlightPrice);
+  } catch (error) {
+    console.log("Selector failed. No price found. Moving on...");
+  }
+
+  return cheapestFlightPrice;
+}
+
+async function obtainPrice(
+  page: Page,
+  aircraftType: string,
+  cheapestFlightPrice: string
+) {
+  const foundPricesButtons = (await page.$$(
+    ".oVHK > .Iqt3"
+  )) as ElementHandle<HTMLAnchorElement>[];
+  foundPricesButtons.forEach(async (button) => {
+    await button.evaluate((btn) => btn.click());
+
+    const aircraftOperating = await page.$$(".NxR6-aircraft-badge");
+
+    if (
+      aircraftOperating.some(async (aircraft) =>
+        (
+          await aircraft.$eval(
+            ".z6uD",
+            (aircraftType) => aircraftType.innerHTML
+          )
+        ).includes(aircraftType)
+      )
+    ) {
+      cheapestFlightPrice = await page.$eval(
+        ".Hv20-value > div > span:nth-child(1)",
+        (el) => el.textContent
+      );
+      return;
+    }
+  });
+
+  if (cheapestFlightPrice === null) {
+    await page.click(".ULvh-button");
+    await obtainPrice(page, aircraftType, cheapestFlightPrice);
+  }
 }
 
 function createPriceObject(price: string, url: string): CheapestFlightPrice {
