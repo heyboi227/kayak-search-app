@@ -242,14 +242,14 @@ async function processDateCombinations(
   const dateCombinations = generateDateCombinations(saturdayIso);
   let urlsToOpenForCombinations: string[] = [];
 
-  for (const dateCombination of dateCombinations) {
-    const airportRotation = singleFlightCheapestPriceUrl
-      .split("/flights/")[1]
-      .split("/")[0];
-    const midpoints = airportRotation.split("-");
-    const firstMidpoint = midpoints[0];
-    const secondMidpoint = midpoints[1];
+  const airportRotation = singleFlightCheapestPriceUrl
+    .split("/flights/")[1]
+    .split("/")[0];
+  const midpoints = airportRotation.split("-");
+  const firstMidpoint = midpoints[0];
+  const secondMidpoint = midpoints[1];
 
+  for (const dateCombination of dateCombinations) {
     const url = `https://www.kayak.ie/flights/BEG-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-BEG/${dateCombination.returnDate}?sort=price_a`;
     urlsToOpenForCombinations.push(url);
   }
@@ -303,7 +303,8 @@ async function processDateCombinations(
 
     const cheapestFlightPrice = await getCheapestFlightPriceForDateCombinations(
       page,
-      aircraftModel
+      aircraftModel,
+      null
     );
 
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
@@ -490,17 +491,10 @@ async function getCheapestFlightPriceForSingleFlightLeg(page: Page) {
 
 async function getCheapestFlightPriceForDateCombinations(
   page: Page,
-  aircraftType: string
+  aircraftType: string,
+  cheapestFlightPrice: string
 ) {
-  let cheapestFlightPrice: string = null;
-
-  try {
-    await obtainPrice(page, aircraftType, cheapestFlightPrice);
-  } catch (error) {
-    console.log("Selector failed. No price found. Moving on...");
-  }
-
-  return cheapestFlightPrice;
+  return await obtainPrice(page, aircraftType, cheapestFlightPrice);
 }
 
 async function obtainPrice(
@@ -511,32 +505,51 @@ async function obtainPrice(
   const foundPricesButtons = (await page.$$(
     ".oVHK > .Iqt3"
   )) as ElementHandle<HTMLAnchorElement>[];
-  foundPricesButtons.forEach(async (button) => {
+  for (const button of foundPricesButtons) {
     await button.evaluate((btn) => btn.click());
+    await page.waitForSelector(".NxR6-aircraft-badge");
 
     const aircraftOperating = await page.$$(".NxR6-aircraft-badge");
 
-    if (
-      aircraftOperating.some(async (aircraft) =>
-        (
-          await aircraft.$eval(
-            ".z6uD",
-            (aircraftType) => aircraftType.innerHTML
-          )
-        ).includes(aircraftType)
-      )
-    ) {
+    let isAircraftFound = false;
+
+    for (const aircraft of aircraftOperating) {
+      const model = await aircraft.$eval(
+        ".z6uD",
+        (aircraftModel) => aircraftModel.innerHTML
+      );
+
+      if (model.includes(aircraftType)) {
+        isAircraftFound = true;
+        break;
+      }
+    }
+
+    if (isAircraftFound) {
       cheapestFlightPrice = await page.$eval(
         ".Hv20-value > div > span:nth-child(1)",
         (el) => el.textContent
       );
-      return;
+      break;
     }
-  });
+  }
 
-  if (cheapestFlightPrice === null) {
-    await page.click(".ULvh-button");
-    await obtainPrice(page, aircraftType, cheapestFlightPrice);
+  if (cheapestFlightPrice !== null) {
+    console.log("Found the cheapest price for the desired aircraft.");
+    return cheapestFlightPrice;
+  } else {
+    console.log("No prices have been found for the desired plane so far.");
+    console.log("Trying to fetch more prices...");
+    try {
+      await Promise.all([
+        page.goBack(),
+        page.click(".show-more-button"),
+        page.waitForNavigation({ waitUntil: "networkidle2" }),
+      ]);
+      await obtainPrice(page, aircraftType, cheapestFlightPrice);
+    } catch (error) {
+      console.log("No more prices available.");
+    }
   }
 }
 
