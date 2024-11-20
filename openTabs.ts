@@ -250,7 +250,7 @@ async function processDateCombinations(
   const secondMidpoint = midpoints[1];
 
   for (const dateCombination of dateCombinations) {
-    const url = `https://www.kayak.ie/flights/BEG-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-BEG/${dateCombination.returnDate}?sort=price_a`;
+    const url = `https://www.kayak.ie/flights/BEG-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-BEG/${dateCombination.returnDate}?fs=baditin=baditin&sort=price_a`;
     urlsToOpenForCombinations.push(url);
   }
 
@@ -304,7 +304,8 @@ async function processDateCombinations(
     const cheapestFlightPrice = await getCheapestFlightPriceForDateCombinations(
       page,
       aircraftModel,
-      null
+      null,
+      airportRotation
     );
 
     if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
@@ -492,45 +493,97 @@ async function getCheapestFlightPriceForSingleFlightLeg(page: Page) {
 async function getCheapestFlightPriceForDateCombinations(
   page: Page,
   aircraftType: string,
-  cheapestFlightPrice: string
+  cheapestFlightPrice: string,
+  airportRotation: string
 ) {
-  return await obtainPrice(page, aircraftType, cheapestFlightPrice);
+  return await obtainPrice(
+    page,
+    aircraftType,
+    cheapestFlightPrice,
+    airportRotation
+  );
 }
 
 async function obtainPrice(
   page: Page,
   aircraftType: string,
-  cheapestFlightPrice: string
+  cheapestFlightPrice: string,
+  airportRotation: string,
+  startIndex: number = 0
 ) {
   const foundPricesButtons = (await page.$$(
     ".oVHK > .Iqt3"
   )) as ElementHandle<HTMLAnchorElement>[];
-  for (const button of foundPricesButtons) {
+  for (const button of foundPricesButtons.slice(startIndex)) {
     await button.evaluate((btn) => btn.click());
-    await page.waitForSelector(".NxR6-aircraft-badge");
 
-    const aircraftOperating = await page.$$(".NxR6-aircraft-badge");
+    let isTheExactRotationWithTheWantedAircraftFound = false;
 
-    let isAircraftFound = false;
+    const flightCards = await page.$$(".E69K-leg-wrapper");
 
-    for (const aircraft of aircraftOperating) {
-      const model = await aircraft.$eval(
-        ".z6uD",
-        (aircraftModel) => aircraftModel.innerHTML
+    for (const flightCard of flightCards) {
+      const flightDate = await flightCard.$eval(
+        ".c2x94-date",
+        (node) => node.innerHTML
       );
 
-      if (model.includes(aircraftType)) {
-        isAircraftFound = true;
+      const flightTime = await flightCard.$eval(
+        ".NxR6-time",
+        (node) => node.innerHTML
+      );
+
+      const [hours, minutes] = flightTime
+        .substring(0, 5)
+        .split(":")
+        .map(Number);
+
+      const date = new Date();
+      const earliestDate = new Date();
+
+      date.setHours(hours, minutes, 0, 0);
+      earliestDate.setHours(17, 0, 0, 0);
+
+      if (flightDate.includes("Fri") && date < earliestDate) {
+        break;
+      }
+
+      const aircraftModel = await flightCard.$eval(
+        ".NxR6-aircraft-badge",
+        (node) => node.innerHTML
+      );
+
+      const flightFromTo = await flightCard.$eval(
+        ".NxR6-airport",
+        (node) => node.innerHTML
+      );
+
+      const originAirportCode = airportRotation.split("-")[0];
+      const destinationAirportCode = airportRotation.split("-")[1];
+
+      if (
+        aircraftModel.includes(aircraftType) &&
+        (flightFromTo.includes(originAirportCode) ||
+          cityCodesForMultipleAirports[originAirportCode].some(
+            (airportCode: string) => flightFromTo.includes(airportCode)
+          )) &&
+        (flightFromTo.includes(destinationAirportCode) ||
+          cityCodesForMultipleAirports[destinationAirportCode].some(
+            (airportCode: string) => flightFromTo.includes(airportCode)
+          ))
+      ) {
+        isTheExactRotationWithTheWantedAircraftFound = true;
         break;
       }
     }
 
-    if (isAircraftFound) {
+    if (isTheExactRotationWithTheWantedAircraftFound) {
       cheapestFlightPrice = await page.$eval(
-        ".Hv20-value > div > span:nth-child(1)",
+        ".jnTP-display-price",
         (el) => el.textContent
       );
-      break;
+      return;
+    } else {
+      startIndex = foundPricesButtons.indexOf(button) + 1;
     }
   }
 
@@ -541,12 +594,17 @@ async function obtainPrice(
     console.log("No prices have been found for the desired plane so far.");
     console.log("Trying to fetch more prices...");
     try {
-      await Promise.all([
-        page.goBack(),
-        page.click(".show-more-button"),
-        page.waitForNavigation({ waitUntil: "networkidle2" }),
-      ]);
-      await obtainPrice(page, aircraftType, cheapestFlightPrice);
+      await page.goBack();
+      await page.click(".show-more-button");
+      await page.waitForNavigation({ waitUntil: "networkidle2" });
+
+      await obtainPrice(
+        page,
+        aircraftType,
+        cheapestFlightPrice,
+        airportRotation,
+        startIndex
+      );
     } catch (error) {
       console.log("No more prices available.");
     }

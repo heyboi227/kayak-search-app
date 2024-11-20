@@ -5,7 +5,7 @@ import { aircraftMappings } from "./aircraftMappings";
 import UserAgent from "user-agents";
 
 async function obtainRotations() {
-  const airportRotations: string[] = [];
+  const airportRotations: { airportRotation: string; flights: string[] }[] = [];
 
   async function retrieveRotationsForAircraftTypes(aircraftTypes: string[]) {
     console.log("Let's grab these rotations, shall we?");
@@ -106,8 +106,10 @@ async function obtainRotations() {
 
     page = await waitForVerification(browser, page);
 
+    await page.reload();
+
     const detailTable = await page.$("#tbl-datatable");
-    if (!detailTable) return null;
+    if (detailTable === null) return null;
 
     const detailRows = await detailTable.$$("tbody > tr");
     const aircraftOperating: string[] = [];
@@ -190,6 +192,7 @@ async function obtainRotations() {
             const originCode = originCellText.slice(-4, -1);
             const destinationCode = destinationCellText.slice(-4, -1);
             const flightLink = await getCellLink(flightLinkCell);
+            const flightNumber = await getCellLinkInnerText(flightLinkCell);
 
             const aircraftFrequency = await checkAircraftFrequency(
               browser,
@@ -203,7 +206,11 @@ async function obtainRotations() {
 
             if (aircraftFrequency.isAircraftFrequent) {
               if (!processedRotations.has(rotation)) {
-                airportRotations.push(rotation);
+                const rotationObj = {
+                  airportRotation: rotation,
+                  flights: [flightNumber],
+                };
+                airportRotations.push(rotationObj);
                 processedRotations.add(rotation);
 
                 console.log(
@@ -212,8 +219,18 @@ async function obtainRotations() {
                   )}% of the total number of rotations for this flight, in the last week.`
                 );
                 console.log(`Added the rotation.`);
+                console.log(rotationObj);
               } else {
-                console.log("Rotation already added.");
+                console.log(
+                  "Rotation already added. Adding any additional flight numbers present."
+                );
+                const existingRotationObject = airportRotations.find(
+                  (rotationObj) => rotationObj.airportRotation === rotation
+                );
+                if (!existingRotationObject.flights.includes(flightNumber)) {
+                  existingRotationObject.flights.push(flightNumber);
+                }
+                console.log(existingRotationObject);
               }
             } else {
               console.log(
@@ -237,6 +254,10 @@ async function obtainRotations() {
     } else {
       console.log("No aircraft rotations to process.");
     }
+  }
+
+  async function getCellLinkInnerText(cell: ElementHandle<HTMLAnchorElement>) {
+    return await cell.evaluate((cell) => cell.textContent.trim());
   }
 
   async function getCellLink(cell: ElementHandle<HTMLAnchorElement>) {
