@@ -43,18 +43,21 @@ async function obtainRotations() {
     page: Page
   ): Promise<Page> {
     while (true) {
+      await delay(Math.floor(Math.random() * 1000 + 1000));
+
       const pageContent = await page.$eval(
         "html",
         (element) => element.innerHTML
       );
+
       if (!pageContent.includes("Verifying")) {
         await acceptCookiesAfterVerification(page);
         return page;
+      } else {
+        await page.close();
+        await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
+        page = await openPage(browser, page.url(), new UserAgent().toString());
       }
-
-      await page.close();
-      await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
-      page = await openPage(browser, page.url(), new UserAgent().toString());
     }
   }
 
