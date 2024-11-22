@@ -170,75 +170,78 @@ async function lookForSingleFlights(
 ) {
   const browser = await launchBrowser(true);
 
-  for (const url of urlsToOpen.slice(startIndex)) {
-    const page = await openPage(
-      browser,
-      url.url,
-      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
-    );
-    console.log(`Opened URL at: ${url.url}.`);
-
-    await handleCaptcha(
-      browser,
-      page,
-      urlsToOpen,
-      urlsToOpen.indexOf(url),
-      flights
-    );
-
-    const cookies = await page.cookies();
-    await page.setCookie(...cookies);
-
-    await delay(500);
-    await acceptCookies(page);
-
-    if (
-      (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
-    ) {
-      await page.reload();
-    }
-
-    const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
-    if (Math.random() > 0.5) {
-      await page.goBack();
-      await delay(2000);
-      await page.goForward();
-    }
-
-    if (Math.random() > 0.5) {
-      await simulateMouseMovement(page);
-    }
-
-    if (Math.random() > 0.5) {
-      const newPage = await browser.newPage();
-      await newPage.goto("https://www.google.com");
-      await delay(Math.random() * 5000 + 2000);
-      await newPage.close();
-    }
-
-    await delayPromise;
-
-    const cheapestFlightPrice = await getCheapestFlightPriceForSingleFlightLeg(
-      page
-    );
-    if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-      console.log(
-        "Prices have been found for this flight. Starting to process date combinations..."
-      );
-      cheapestFlightPriceFoundUrl = url.url;
-
-      await processDateCombinations(
+  try {
+    for (const url of urlsToOpen.slice(startIndex)) {
+      const page = await openPage(
         browser,
-        cheapestFlightPriceFoundUrl,
-        saturdayIso,
-        aircraftModel,
+        url.url,
+        userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+      );
+      console.log(`Opened URL at: ${url.url}.`);
+
+      await handleCaptcha(
+        browser,
+        page,
+        urlsToOpen,
+        urlsToOpen.indexOf(url),
         flights
       );
 
-      await page.close();
-    } else {
-      await page.close();
+      const cookies = await page.cookies();
+      await page.setCookie(...cookies);
+
+      await delay(500);
+      await acceptCookies(page);
+
+      if (
+        (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+      ) {
+        await page.reload();
+      }
+
+      const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
+      if (Math.random() > 0.5) {
+        await page.goBack();
+        await delay(2000);
+        await page.goForward();
+      }
+
+      if (Math.random() > 0.5) {
+        await simulateMouseMovement(page);
+      }
+
+      if (Math.random() > 0.5) {
+        const newPage = await browser.newPage();
+        await newPage.goto("https://www.google.com");
+        await delay(Math.random() * 5000 + 2000);
+        await newPage.close();
+      }
+
+      await delayPromise;
+
+      const cheapestFlightPrice =
+        await getCheapestFlightPriceForSingleFlightLeg(page);
+      if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
+        console.log(
+          "Prices have been found for this flight. Starting to process date combinations..."
+        );
+        cheapestFlightPriceFoundUrl = url.url;
+
+        await processDateCombinations(
+          browser,
+          cheapestFlightPriceFoundUrl,
+          saturdayIso,
+          aircraftModel,
+          flights
+        );
+
+        await page.close();
+      } else {
+        await page.close();
+      }
     }
+  } catch (error) {
+    console.log("An error occured.", error);
   }
 }
 
@@ -265,69 +268,173 @@ async function processDateCombinations(
     urlsToOpenForCombinations.push(url);
   }
 
-  for (const url of urlsToOpenForCombinations.slice(startIndex)) {
-    const page = await openPage(
-      browser,
-      url,
-      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
-    );
-    console.log(`Opened URL at: ${url}.`);
+  try {
+    for (const url of urlsToOpenForCombinations.slice(startIndex)) {
+      const page = await openPage(
+        browser,
+        url,
+        userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+      );
+      console.log(`Opened URL at: ${url}.`);
 
-    await handleDateCombinationsCaptcha(
-      browser,
-      page,
-      urlsToOpenForCombinations.indexOf(url),
-      flights
-    );
+      await handleDateCombinationsCaptcha(
+        browser,
+        page,
+        urlsToOpenForCombinations.indexOf(url),
+        flights
+      );
 
-    const cookies = await page.cookies();
-    await page.setCookie(...cookies);
+      const cookies = await page.cookies();
+      await page.setCookie(...cookies);
 
-    await delay(500);
-    await acceptCookies(page);
-    await delay(Math.floor(Math.random() * 30000 + 90000));
+      await delay(500);
+      await acceptCookies(page);
+      await delay(Math.floor(Math.random() * 30000 + 90000));
 
-    if (
-      (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
-    ) {
-      await page.reload();
+      if (
+        (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+      ) {
+        await page.reload();
+      }
+
+      const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
+      if (Math.random() > 0.5) {
+        await page.goBack();
+        await delay(2000);
+        await page.goForward();
+      }
+
+      if (Math.random() > 0.5) {
+        await simulateMouseMovement(page);
+      }
+
+      if (Math.random() > 0.5) {
+        const newPage = await browser.newPage();
+        await newPage.goto("https://www.google.com");
+        await delay(Math.random() * 5000 + 2000);
+        await newPage.close();
+      }
+
+      await delayPromise;
+
+      const cheapestFlightPrice =
+        await getCheapestFlightPriceForDateCombinationsAndFlexibleDates(
+          page,
+          aircraftModel,
+          null,
+          airportRotation,
+          flights
+        );
+
+      if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
+        const priceObj = createPriceObject(cheapestFlightPrice, url);
+        cheapestFlightPrices.push(priceObj);
+        console.log("Added the link.");
+      }
+
+      await page.close();
     }
+  } catch (error) {
+    console.log("An error occured.", error);
+  }
 
-    const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
-    if (Math.random() > 0.5) {
-      await page.goBack();
-      await delay(2000);
-      await page.goForward();
+  await processFlexibleDates(
+    browser,
+    cheapestFlightPriceFoundUrl,
+    saturdayIso,
+    aircraftModel,
+    flights
+  );
+}
+
+async function processFlexibleDates(
+  browser: Browser,
+  singleFlightCheapestPriceUrl: string,
+  saturdayIso: string,
+  aircraftModel: string,
+  flights: { airlineName: string; flightNumber: string }[],
+  startIndex: number = 0
+) {
+  let urlsToOpenForCombinations: string[] = [];
+
+  const airportRotation = singleFlightCheapestPriceUrl
+    .split("/flights/")[1]
+    .split("/")[0];
+  const midpoints = airportRotation.split("-");
+
+  for (const midpoint of midpoints) {
+    const url = `https://www.kayak.ie/flights/BEG-${midpoint}/${saturdayIso}-flexible-1day/${saturdayIso}-flexible-1day?fs=baditin=baditin;eqmodel=~A350&sort=price_a`;
+    urlsToOpenForCombinations.push(url);
+  }
+
+  try {
+    for (const url of urlsToOpenForCombinations.slice(startIndex)) {
+      const page = await openPage(
+        browser,
+        url,
+        userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+      );
+      console.log(`Opened URL at: ${url}.`);
+
+      await handleFlexibleDatesCaptcha(
+        browser,
+        page,
+        urlsToOpenForCombinations.indexOf(url),
+        flights
+      );
+
+      const cookies = await page.cookies();
+      await page.setCookie(...cookies);
+
+      await delay(500);
+      await acceptCookies(page);
+      await delay(Math.floor(Math.random() * 30000 + 90000));
+
+      if (
+        (await page.$eval("html", (page) => page.innerHTML)).includes("expired")
+      ) {
+        await page.reload();
+      }
+
+      const delayPromise = delay(Math.floor(Math.random() * 30000 + 90000));
+      if (Math.random() > 0.5) {
+        await page.goBack();
+        await delay(2000);
+        await page.goForward();
+      }
+
+      if (Math.random() > 0.5) {
+        await simulateMouseMovement(page);
+      }
+
+      if (Math.random() > 0.5) {
+        const newPage = await browser.newPage();
+        await newPage.goto("https://www.google.com");
+        await delay(Math.random() * 5000 + 2000);
+        await newPage.close();
+      }
+
+      await delayPromise;
+
+      const cheapestFlightPrice =
+        await getCheapestFlightPriceForDateCombinationsAndFlexibleDates(
+          page,
+          aircraftModel,
+          null,
+          airportRotation,
+          flights
+        );
+
+      if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
+        const priceObj = createPriceObject(cheapestFlightPrice, url);
+        cheapestFlightPrices.push(priceObj);
+        console.log("Added the link.");
+      }
+
+      await page.close();
     }
-
-    if (Math.random() > 0.5) {
-      await simulateMouseMovement(page);
-    }
-
-    if (Math.random() > 0.5) {
-      const newPage = await browser.newPage();
-      await newPage.goto("https://www.google.com");
-      await delay(Math.random() * 5000 + 2000);
-      await newPage.close();
-    }
-
-    await delayPromise;
-
-    const cheapestFlightPrice = await getCheapestFlightPriceForDateCombinations(
-      page,
-      aircraftModel,
-      null,
-      airportRotation,
-      flights
-    );
-
-    if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-      const priceObj = createPriceObject(cheapestFlightPrice, url);
-      cheapestFlightPrices.push(priceObj);
-      console.log("Added the link.");
-    }
-
-    await page.close();
+  } catch (error) {
+    console.log("An error occured.", error);
   }
 
   if (cheapestFlightPrices.length > 0) {
@@ -410,6 +517,41 @@ async function handleDateCombinationsCaptcha(
   flights: { airlineName: string; flightNumber: string }[]
 ) {
   if (await isCaptchaPage(page.url())) {
+    browser = await launchBrowser(false);
+
+    const newPage = await openPage(
+      browser,
+      page.url(),
+      userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+    );
+
+    await delay(3500);
+    await acceptCookies(newPage);
+
+    await notifyCaptchaNeeded();
+    await waitForCaptchaSolution(newPage);
+
+    await browser.close();
+
+    browser = await launchBrowser(true);
+    await processDateCombinations(
+      browser,
+      cheapestFlightPriceFoundUrl,
+      saturdayIso,
+      aircraftModel,
+      flights,
+      urlIndex
+    );
+  }
+}
+
+async function handleFlexibleDatesCaptcha(
+  browser: Browser,
+  page: Page,
+  urlIndex: number,
+  flights: { airlineName: string; flightNumber: string }[]
+) {
+  if (await isCaptchaPage(page.url())) {
     const pages = await browser.pages();
     for (const page of pages) {
       let index: number = 0;
@@ -440,7 +582,7 @@ async function handleDateCombinationsCaptcha(
     await browser.close();
 
     browser = await launchBrowser(true);
-    await processDateCombinations(
+    await processFlexibleDates(
       browser,
       cheapestFlightPriceFoundUrl,
       saturdayIso,
@@ -506,7 +648,7 @@ async function getCheapestFlightPriceForSingleFlightLeg(page: Page) {
   return cheapestFlightPrice;
 }
 
-async function getCheapestFlightPriceForDateCombinations(
+async function getCheapestFlightPriceForDateCombinationsAndFlexibleDates(
   page: Page,
   aircraftType: string,
   cheapestFlightPrice: string,
@@ -546,25 +688,52 @@ async function obtainPrice(
         (node) => node.innerHTML
       );
 
-      const flightTime = await flightCard.$eval(
+      const departureTime = await flightCard.$eval(
         ".NxR6-time",
         (node) => node.innerHTML
       );
 
-      const [hours, minutes] = flightTime
+      const [departureHours, departureMinutes] = departureTime
         .substring(0, 5)
         .split(":")
         .map(Number);
 
-      const date = new Date();
-      const earliestDate = new Date();
+      const departureDate = new Date();
+      departureDate.setHours(departureHours, departureMinutes, 0, 0);
 
-      date.setHours(hours, minutes, 0, 0);
-      earliestDate.setHours(17, 0, 0, 0);
+      const earliestDepartureDate = new Date();
+      earliestDepartureDate.setHours(17, 0, 0, 0);
 
-      if (flightDate.includes("Fri") && date < earliestDate) {
-        break;
-      }
+      const dateWarning = await flightCard.$(".NxR6-date-warning");
+
+      const legWrappers = await flightCard.$$(".NxR6-segment");
+
+      const lastLegWrapper = legWrappers[legWrappers.length - 1];
+
+      const arrivalTime = await lastLegWrapper.$eval(
+        ".NxR6-time",
+        (node) => node.innerHTML
+      );
+
+      const [arrivalHours, arrivalMinutes] = arrivalTime
+        .substring(0, 5)
+        .split(":")
+        .map(Number);
+
+      const arrivalDate = new Date();
+      arrivalDate.setHours(arrivalHours, arrivalMinutes, 0, 0);
+
+      const latestArrivalDate = new Date();
+      latestArrivalDate.setHours(9, 0, 0, 0);
+
+      if (
+        (flightDate.includes("Fri") && departureDate < earliestDepartureDate) ||
+        (dateWarning !== null &&
+          (await dateWarning.evaluate((node) => node.textContent)).includes(
+            "Mon"
+          ) &&
+          arrivalDate > latestArrivalDate)
+      ) break;
 
       const airlineName = (
         await flightCard.$eval(
@@ -585,14 +754,35 @@ async function obtainPrice(
         .trim()
         .toLowerCase();
 
-      for (const flight of flights)
+      const operatedBy = (
+        await flightCard.$eval(
+          ".NxR6-plane-details > div:nth-child(2)",
+          (node) => node.innerText
+        )
+      )
+        .trim()
+        .toLowerCase();
+
+      const aircraftModel = (
+        await flightCard.$eval(
+          ".NxR6-aircraft-badge > div",
+          (node) => node.innerText
+        )
+      ).trim();
+
+      for (const flight of flights) {
         if (
-          flight.airlineName.trim().toLowerCase() === airlineName &&
-          flight.flightNumber.trim().replace(/\D+/g, "") === flightNumber
+          (flight.airlineName.trim().toLowerCase() === airlineName &&
+            flight.flightNumber.trim().replace(/\D+/g, "") === flightNumber) ||
+          (aircraftModel.includes(aircraftType) &&
+            operatedBy.includes(flight.airlineName.trim().toLowerCase()))
         ) {
           flightThatOperatesTheAircraftFound = true;
           break;
         }
+      }
+
+      if (flightThatOperatesTheAircraftFound) break;
     }
 
     if (flightThatOperatesTheAircraftFound) {
@@ -600,7 +790,7 @@ async function obtainPrice(
         ".jnTP-display-price",
         (el) => el.textContent
       );
-      return;
+      break;
     } else {
       startIndex = foundPricesButtons.indexOf(button) + 1;
     }
