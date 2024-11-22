@@ -5,7 +5,18 @@ import { aircraftMappings } from "./aircraftMappings";
 import UserAgent from "user-agents";
 
 async function obtainRotations() {
-  const airportRotations: { airportRotation: string; flights: string[] }[] = [];
+  const airportRotations: string[] = [];
+
+  const flights: {
+    airlineName: string;
+    flightNumber: string;
+  }[] = [];
+
+  const processedRotations = new Set<string>();
+  const processedFlights = new Set<{
+    airlineName: string;
+    flightNumber: string;
+  }>();
 
   async function retrieveRotationsForAircraftTypes(aircraftTypes: string[]) {
     console.log("Let's grab these rotations, shall we?");
@@ -21,6 +32,7 @@ async function obtainRotations() {
     }
 
     await saveData(airportRotations, "rotations.json");
+    await saveData(flights, "flights.json");
     await browser.close();
 
     console.log(`Successfully added the airports. Let's go!`);
@@ -38,27 +50,18 @@ async function obtainRotations() {
     } catch {}
   }
 
-  async function waitForVerification(
-    browser: Browser,
-    page: Page
-  ): Promise<Page> {
-    while (true) {
-      await delay(Math.floor(Math.random() * 1000 + 1000));
+  async function waitForVerification(page: Page): Promise<Page> {
+    const pageContent = await page.$eval(
+      "html",
+      (element) => element.innerHTML
+    );
 
-      const pageContent = await page.$eval(
-        "html",
-        (element) => element.innerHTML
-      );
-
-      if (!pageContent.includes("Verifying")) {
-        await acceptCookiesAfterVerification(page);
-        return page;
-      } else {
-        await page.close();
-        await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
-        page = await openPage(browser, page.url(), new UserAgent().toString());
-      }
+    if (pageContent.includes("Verifying")) {
+      await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
+      await acceptCookiesAfterVerification(page);
     }
+
+    return page;
   }
 
   async function processLinks(
@@ -88,7 +91,7 @@ async function obtainRotations() {
       new UserAgent().toString()
     );
 
-    detailPage = await waitForVerification(browser, detailPage);
+    detailPage = await waitForVerification(detailPage);
 
     try {
       await extractAirportRotations(browser, detailPage, aircraftType);
@@ -104,18 +107,24 @@ async function obtainRotations() {
     browser: Browser,
     url: string,
     aircraftTypeICAO: string
-  ): Promise<{ aircraftFrequency: number; isAircraftFrequent: boolean }> {
+  ): Promise<{
+    aircraftFrequency: number;
+    isAircraftFrequent: boolean;
+    airlineName: string;
+  }> {
     let page = await openPage(browser, url, new UserAgent().toString());
 
-    page = await waitForVerification(browser, page);
-
-    await page.reload();
+    page = await waitForVerification(page);
 
     const detailTable = await page.$("#tbl-datatable");
     if (detailTable === null) return null;
 
     const detailRows = await detailTable.$$("tbody > tr");
     const aircraftOperating: string[] = [];
+
+    const airlineName = await page.$eval("#cnt-playback", (element) =>
+      element.getAttribute("data-airline-name")
+    );
 
     for (const detailRow of detailRows) {
       const aircraftTypeCell = await detailRow.$("td:nth-child(6)");
@@ -147,6 +156,7 @@ async function obtainRotations() {
     return {
       aircraftFrequency: percentage,
       isAircraftFrequent: percentage >= 50,
+      airlineName,
     };
   }
 
@@ -155,8 +165,6 @@ async function obtainRotations() {
     page: Page,
     aircraftType: string
   ) {
-    const processedRotations = new Set<string>();
-
     const detailTable = await page.$("#tbl-datatable");
     if (!detailTable) {
       console.log("No rotation data available for this aircraft.");
@@ -197,23 +205,24 @@ async function obtainRotations() {
             const flightLink = await getCellLink(flightLinkCell);
             const flightNumber = await getCellLinkInnerText(flightLinkCell);
 
+            const rotation = `${originCode}-${destinationCode}`;
+
+            console.log(`Checking out rotation: ${rotation}.`);
+
             const aircraftFrequency = await checkAircraftFrequency(
               browser,
               flightLink,
               aircraftType
             );
 
-            const rotation = `${originCode}-${destinationCode}`;
-
-            console.log(`Checking out rotation: ${rotation}.`);
+            const flightNumberObj = {
+              airlineName: aircraftFrequency.airlineName,
+              flightNumber,
+            };
 
             if (aircraftFrequency.isAircraftFrequent) {
               if (!processedRotations.has(rotation)) {
-                const rotationObj = {
-                  airportRotation: rotation,
-                  flights: [flightNumber],
-                };
-                airportRotations.push(rotationObj);
+                airportRotations.push(rotation);
                 processedRotations.add(rotation);
 
                 console.log(
@@ -221,19 +230,30 @@ async function obtainRotations() {
                     aircraftFrequency.aircraftFrequency
                   )}% of the total number of rotations for this flight, in the last week.`
                 );
-                console.log(`Added the rotation.`);
-                console.log(rotationObj);
+                console.log("Added the rotation.");
               } else {
-                console.log(
-                  "Rotation already added. Adding any additional flight numbers present."
-                );
-                const existingRotationObject = airportRotations.find(
-                  (rotationObj) => rotationObj.airportRotation === rotation
-                );
-                if (!existingRotationObject.flights.includes(flightNumber)) {
-                  existingRotationObject.flights.push(flightNumber);
+                console.log("Rotation already added. Skipped the rotation.");
+              }
+
+              let setHasEquivalentFlightNumberObj = false;
+
+              for (const flight of processedFlights) {
+                if (
+                  flight.airlineName === flightNumberObj.airlineName &&
+                  flight.flightNumber === flightNumberObj.flightNumber
+                ) {
+                  setHasEquivalentFlightNumberObj = true;
                 }
-                console.log(existingRotationObject);
+              }
+
+              if (!setHasEquivalentFlightNumberObj) {
+                flights.push(flightNumberObj);
+                processedFlights.add(flightNumberObj);
+                console.log(
+                  `Added the flight: ${JSON.stringify(flightNumberObj)}`
+                );
+              } else {
+                console.log("Flight already added. Skipped the flight.");
               }
             } else {
               console.log(
