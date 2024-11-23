@@ -679,6 +679,7 @@ async function obtainPrice(
     await button.evaluate((btn) => btn.click());
 
     let flightThatOperatesTheAircraftFound = false;
+    let nonSuitableTimesFound = false;
 
     const flightCards = await page.$$(".E69K-leg-wrapper");
 
@@ -688,52 +689,54 @@ async function obtainPrice(
         (node) => node.innerHTML
       );
 
-      const departureTime = await flightCard.$eval(
-        ".NxR6-time",
-        (node) => node.innerHTML
-      );
+      const flightSegments = await flightCard.$$(".NxR6-segment");
 
-      const [departureHours, departureMinutes] = departureTime
-        .substring(0, 5)
-        .split(":")
-        .map(Number);
+      for (const flightSegment of flightSegments) {
+        const flightTime = await flightSegment.$eval(
+          ".NxR6-time",
+          (node) => node.innerHTML
+        );
 
-      const departureDate = new Date();
-      departureDate.setHours(departureHours, departureMinutes, 0, 0);
+        const [departureHours, departureMinutes] = flightTime
+          .substring(0, 5)
+          .split(":")
+          .map(Number);
 
-      const earliestDepartureDate = new Date();
-      earliestDepartureDate.setHours(17, 0, 0, 0);
+        const [arrivalHours, arrivalMinutes] = flightTime
+          .substring(8)
+          .split(":")
+          .map(Number);
 
-      const dateWarning = await flightCard.$(".NxR6-date-warning");
+        const flightStartTime = new Date();
+        flightStartTime.setHours(departureHours, departureMinutes, 0, 0);
 
-      const legWrappers = await flightCard.$$(".NxR6-segment");
+        const flightEndTime = new Date();
+        flightStartTime.setHours(arrivalHours, arrivalMinutes, 0, 0);
 
-      const lastLegWrapper = legWrappers[legWrappers.length - 1];
+        const earliestDepartureTime = new Date();
+        earliestDepartureTime.setHours(17, 0, 0, 0);
 
-      const arrivalTime = await lastLegWrapper.$eval(
-        ".NxR6-time",
-        (node) => node.innerHTML
-      );
+        const latestArrivalTime = new Date();
+        latestArrivalTime.setHours(9, 0, 0, 0);
 
-      const [arrivalHours, arrivalMinutes] = arrivalTime
-        .substring(0, 5)
-        .split(":")
-        .map(Number);
+        const dateWarning = await flightSegment.$(".NxR6-date-warning");
 
-      const arrivalDate = new Date();
-      arrivalDate.setHours(arrivalHours, arrivalMinutes, 0, 0);
+        if (
+          (flightDate.includes("Fri") &&
+            flightStartTime < earliestDepartureTime) ||
+          ((flightDate.includes("Mon") ||
+            (dateWarning !== null &&
+              (await dateWarning.evaluate((node) => node.textContent)).includes(
+                "Mon"
+              ))) &&
+            flightEndTime > latestArrivalTime)
+        ) {
+          nonSuitableTimesFound = true;
+          break;
+        }
+      }
 
-      const latestArrivalDate = new Date();
-      latestArrivalDate.setHours(9, 0, 0, 0);
-
-      if (
-        (flightDate.includes("Fri") && departureDate < earliestDepartureDate) ||
-        (dateWarning !== null &&
-          (await dateWarning.evaluate((node) => node.textContent)).includes(
-            "Mon"
-          ) &&
-          arrivalDate > latestArrivalDate)
-      ) break;
+      if (nonSuitableTimesFound) break;
 
       const airlineName = (
         await flightCard.$eval(
