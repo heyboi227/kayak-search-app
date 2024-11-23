@@ -703,7 +703,7 @@ async function obtainPrice(
           .map(Number);
 
         const [arrivalHours, arrivalMinutes] = flightTime
-          .substring(8)
+          .substring(8, 13)
           .split(":")
           .map(Number);
 
@@ -711,7 +711,7 @@ async function obtainPrice(
         flightStartTime.setHours(departureHours, departureMinutes, 0, 0);
 
         const flightEndTime = new Date();
-        flightStartTime.setHours(arrivalHours, arrivalMinutes, 0, 0);
+        flightEndTime.setHours(arrivalHours, arrivalMinutes, 0, 0);
 
         const earliestDepartureTime = new Date();
         earliestDepartureTime.setHours(17, 0, 0, 0);
@@ -794,15 +794,16 @@ async function obtainPrice(
         (el) => el.textContent
       );
       break;
-    } else {
-      startIndex = foundPricesButtons.indexOf(button) + 1;
     }
+
+    await page.goBack();
   }
 
   if (cheapestFlightPrice !== null) {
     console.log("Found the cheapest price for the desired aircraft.");
     return cheapestFlightPrice;
   } else {
+    startIndex = foundPricesButtons.length;
     console.log("No prices have been found for the desired plane so far.");
     console.log("Trying to fetch more prices...");
     try {
