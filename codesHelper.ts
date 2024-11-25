@@ -171,6 +171,9 @@ async function obtainRotations() {
       return;
     }
 
+    let processedRotationsForThisAircraft = 0;
+    let processedFlightsForThisAircraft = 0;
+
     const detailRows = await detailTable.$$("tbody > tr");
 
     for (const detailRow of detailRows) {
@@ -225,6 +228,8 @@ async function obtainRotations() {
                 airportRotations.push(rotation);
                 processedRotations.add(rotation);
 
+                processedRotationsForThisAircraft++;
+
                 console.log(
                   `This aircraft was in service at ${Math.round(
                     aircraftFrequency.aircraftFrequency
@@ -249,6 +254,9 @@ async function obtainRotations() {
               if (!setHasEquivalentFlightNumberObj) {
                 flights.push(flightNumberObj);
                 processedFlights.add(flightNumberObj);
+
+                processedFlightsForThisAircraft++;
+
                 console.log(
                   `Added the flight: ${JSON.stringify(flightNumberObj)}`
                 );
@@ -270,12 +278,15 @@ async function obtainRotations() {
       }
     }
 
-    if (processedRotations.size > 0) {
+    if (
+      processedRotationsForThisAircraft > 0 ||
+      processedFlightsForThisAircraft > 0
+    ) {
       console.log(
-        `Processed ${processedRotations.size} rotations for this aircraft.`
+        `Added ${processedRotationsForThisAircraft} rotations and ${processedFlightsForThisAircraft} flights for this aircraft.`
       );
     } else {
-      console.log("No aircraft rotations to process.");
+      console.log("No aircraft rotations or flights to add.");
     }
   }
 
@@ -344,7 +355,7 @@ async function obtainRotations() {
     }
   }
 
-  retrieveRotationsForAircraftTypes(["A359", "A35K"]);
+  retrieveRotationsForAircraftTypes(["A388"]);
 }
 
 obtainRotations();

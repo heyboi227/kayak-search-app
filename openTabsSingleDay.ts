@@ -5,6 +5,13 @@ import { launchBrowser, openPage } from "./prepareBrowser";
 import { delay, loadData } from "./helpers";
 import { restrictedAirports } from "./restrictedAirports";
 import UserAgent from "user-agents";
+import moment from "moment-timezone";
+
+const airportTz: {
+  code: string;
+  timezone: string;
+  offset: { gmt: number; dst: number };
+}[] = require("airport-timezone");
 
 type CheapestFlightPrice = { date: string; price: number; url: string };
 type FlightDate = {
@@ -355,6 +362,10 @@ async function processFlexibleDates(
   flights: { airlineName: string; flightNumber: string }[],
   startIndex: number = 0
 ) {
+  console.log(
+    "No prices have been found for the date combinations. Starting to process the flexible date options."
+  );
+
   let urlsToOpenForCombinations: string[] = [];
 
   const airportRotation = singleFlightCheapestPriceUrl
@@ -675,6 +686,10 @@ async function obtainPrice(
   const foundPricesButtons = (await page.$$(
     ".oVHK > .Iqt3"
   )) as ElementHandle<HTMLAnchorElement>[];
+
+  const homeTimeZone = "Europe/Belgrade";
+  const cutoffLocalTime = "09:00";
+
   for (const button of foundPricesButtons.slice(startIndex)) {
     await button.evaluate((btn) => btn.click());
 
@@ -689,6 +704,10 @@ async function obtainPrice(
         (node) => node.innerHTML
       );
 
+      const arrivalAirportIATA = (
+        await flightCard.$eval(".c2x94-title", (node) => node.textContent)
+      ).substring(6, 9);
+
       const flightSegments = await flightCard.$$(".NxR6-segment");
 
       for (const flightSegment of flightSegments) {
@@ -702,22 +721,23 @@ async function obtainPrice(
           .split(":")
           .map(Number);
 
-        const [arrivalHours, arrivalMinutes] = flightTime
-          .substring(8, 13)
-          .split(":")
-          .map(Number);
-
         const flightStartTime = new Date();
         flightStartTime.setHours(departureHours, departureMinutes, 0, 0);
-
-        const flightEndTime = new Date();
-        flightEndTime.setHours(arrivalHours, arrivalMinutes, 0, 0);
 
         const earliestDepartureTime = new Date();
         earliestDepartureTime.setHours(17, 0, 0, 0);
 
-        const latestArrivalTime = new Date();
-        latestArrivalTime.setHours(9, 0, 0, 0);
+        const arrivalTimeZone = airportTz.filter(
+          (airport) => airport.code === arrivalAirportIATA
+        )[0]?.timezone;
+
+        const arrivalLocalTime = flightTime.substring(8, 13);
+
+        const arrivalInHomeTimeZone = moment
+          .tz(arrivalLocalTime, "HH:mm", arrivalTimeZone)
+          .tz(homeTimeZone);
+
+        const cutoffTime = moment.tz(cutoffLocalTime, "HH:mm", homeTimeZone);
 
         const dateWarning = await flightSegment.$(".NxR6-date-warning");
 
@@ -729,7 +749,7 @@ async function obtainPrice(
               (await dateWarning.evaluate((node) => node.textContent)).includes(
                 "Mon"
               ))) &&
-            flightEndTime > latestArrivalTime)
+            arrivalInHomeTimeZone.isAfter(cutoffTime))
         ) {
           nonSuitableTimesFound = true;
           break;
@@ -744,8 +764,8 @@ async function obtainPrice(
           (node) => node.innerText
         )
       )
+        .replace(/\d+/g, "")
         .trim()
-        .replace(/ \d+/g, "")
         .toLowerCase();
 
       const flightNumber = (
@@ -753,9 +773,7 @@ async function obtainPrice(
           ".NxR6-plane-details > div:nth-child(1) > span",
           (node) => node.innerText
         )
-      )
-        .trim()
-        .toLowerCase();
+      ).trim();
 
       const operatedBy = (
         await flightCard.$eval(
@@ -773,19 +791,30 @@ async function obtainPrice(
         )
       ).trim();
 
-      for (const flight of flights) {
-        if (
-          (flight.airlineName.trim().toLowerCase() === airlineName &&
-            flight.flightNumber.trim().replace(/\D+/g, "") === flightNumber) ||
-          (aircraftModel.includes(aircraftType) &&
-            operatedBy.includes(flight.airlineName.trim().toLowerCase()))
-        ) {
-          flightThatOperatesTheAircraftFound = true;
-          break;
-        }
+      const availableAirlineFlights = flights.filter(
+        (flight) => flight.airlineName.trim().toLowerCase() === airlineName
+      );
+
+      let exactFlight: {
+        airlineName: string;
+        flightNumber: string;
+      } = undefined;
+
+      if (availableAirlineFlights.length > 0) {
+        exactFlight = availableAirlineFlights.find(
+          (flight) =>
+            flight.flightNumber.trim().replace(/\D+/g, "") === flightNumber
+        );
       }
 
-      if (flightThatOperatesTheAircraftFound) break;
+      if (
+        exactFlight !== undefined ||
+        (aircraftModel.includes(aircraftType) &&
+          operatedBy.includes(exactFlight?.airlineName.trim().toLowerCase()))
+      ) {
+        flightThatOperatesTheAircraftFound = true;
+        break;
+      }
     }
 
     if (flightThatOperatesTheAircraftFound) {
