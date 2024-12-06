@@ -13,7 +13,17 @@ const airportTz: {
   offset: { gmt: number; dst: number };
 }[] = require("airport-timezone");
 
-type CheapestFlightPrice = { date: string; price: number; url: string };
+type CheapestFlightPrice = {
+  date: string;
+  price: number;
+  url: string;
+  flightInfo: {
+    flightTime: string;
+    flightRoute: string;
+    flightNumber: string;
+    aircraft: string;
+  }[];
+};
 type FlightDate = {
   departureDate: string;
   midpointDate: string;
@@ -76,7 +86,7 @@ const cityCodesForMultipleAirports = {
   THR: ["IKA", "THR"],
 };
 
-const saturday = new Date("2024-12-07");
+const saturday = new Date("2024-12-14");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 const userAgent = new UserAgent({ deviceCategory: "desktop" });
@@ -236,7 +246,8 @@ async function lookForSingleFlights(
           cheapestFlightPriceFoundUrl,
           saturdayIso,
           aircraftModel,
-          flights
+          flights,
+          urlsToOpen
         );
 
         await page.close();
@@ -255,6 +266,7 @@ async function processDateCombinations(
   saturdayIso: string,
   aircraftModel: string,
   flights: { airlineName: string; flightNumber: string }[],
+  urlsToOpen: { url: string; airportRotation: string }[],
   startIndex: number = 0
 ) {
   const dateCombinations = generateDateCombinations(saturdayIso);
@@ -285,7 +297,8 @@ async function processDateCombinations(
         browser,
         page,
         urlsToOpenForCombinations.indexOf(url),
-        flights
+        flights,
+        urlsToOpen
       );
 
       const cookies = await browser.cookies();
@@ -320,6 +333,8 @@ async function processDateCombinations(
         await page.bringToFront();
       }
 
+      console.log(`Looking for prices at: ${page.url()}.`);
+
       const cheapestFlightPrice =
         await getCheapestFlightPriceForDateCombinationsAndFlexibleDates(
           browser,
@@ -328,11 +343,16 @@ async function processDateCombinations(
           null,
           airportRotation,
           flights,
-          singleFlightCheapestPriceUrl
+          singleFlightCheapestPriceUrl,
+          urlsToOpen
         );
 
       if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-        const priceObj = createPriceObject(cheapestFlightPrice, page.url());
+        const priceObj = createPriceObject(
+          cheapestFlightPrice.cheapestFlightPrice,
+          page.url(),
+          cheapestFlightPrice.flightInfoArr
+        );
         cheapestFlightPrices.push(priceObj);
         console.log("Added the link.");
       }
@@ -415,7 +435,8 @@ async function handleDateCombinationsCaptcha(
   browser: Browser,
   page: Page,
   urlIndex: number,
-  flights: { airlineName: string; flightNumber: string }[]
+  flights: { airlineName: string; flightNumber: string }[],
+  urlsToOpen: { url: string; airportRotation: string }[]
 ) {
   if (await isCaptchaPage(page.url())) {
     await delay(3500);
@@ -432,6 +453,7 @@ async function handleDateCombinationsCaptcha(
       saturdayIso,
       aircraftModel,
       flights,
+      urlsToOpen,
       urlIndex
     );
   }
@@ -499,7 +521,8 @@ async function getCheapestFlightPriceForDateCombinationsAndFlexibleDates(
   cheapestFlightPrice: string,
   airportRotation: string,
   flights: { airlineName: string; flightNumber: string }[],
-  singleFlightCheapestPriceUrl: string
+  singleFlightCheapestPriceUrl: string,
+  urlsToOpen: { url: string; airportRotation: string }[]
 ) {
   return await obtainPrice(
     browser,
@@ -508,7 +531,8 @@ async function getCheapestFlightPriceForDateCombinationsAndFlexibleDates(
     cheapestFlightPrice,
     airportRotation,
     flights,
-    singleFlightCheapestPriceUrl
+    singleFlightCheapestPriceUrl,
+    urlsToOpen
   );
 }
 
@@ -520,6 +544,7 @@ async function obtainPrice(
   airportRotation: string,
   flights: { airlineName: string; flightNumber: string }[],
   singleFlightCheapestPriceUrl: string,
+  urlsToOpen: { url: string; airportRotation: string }[],
   startIndex: number = 0
 ) {
   let foundPricesButtons = (await page.$$(
@@ -544,24 +569,27 @@ async function obtainPrice(
   }
 
   if (foundPricesButtons.length === 0) {
-    await processDateCombinations(
-      browser,
-      singleFlightCheapestPriceUrl,
-      saturdayIso,
-      aircraftModel,
-      flights,
-      startIndex
-    );
+    await lookForSingleFlights(browser, urlsToOpen, flights);
   }
 
   const homeTimeZone = "Europe/Belgrade";
   const cutoffUTCTime = "08:00";
 
+  let flightInfoArr: {
+    flightTime: string;
+    flightRoute: string;
+    flightNumber: string;
+    aircraft: string;
+  }[] = [];
+
   for (const button of foundPricesButtons.slice(startIndex)) {
     await button.evaluate((btn) => btn.click());
+    await page.waitForNavigation({ waitUntil: "networkidle2" });
 
     let flightThatOperatesTheAircraftFound = false;
     let nonSuitableTimesFound = false;
+
+    let foundNonAircraftDeal = false;
 
     const flightCards = await page.$$(".E69K-leg-wrapper");
 
@@ -623,68 +651,112 @@ async function obtainPrice(
         }
       }
 
-      if (nonSuitableTimesFound) break;
-
-      const airlineName = (
-        await flightCard.$eval(
-          ".NxR6-plane-details > div:nth-child(1)",
-          (node) => node.innerText
-        )
-      )
-        .replace(/\d+/g, "")
-        .trim()
-        .toLowerCase();
-
-      const flightNumber = (
-        await flightCard.$eval(
-          ".NxR6-plane-details > div:nth-child(1) > span",
-          (node) => node.innerText
-        )
-      ).trim();
-
-      const operatedBy = (
-        await flightCard.$eval(
-          ".NxR6-plane-details > div:nth-child(2)",
-          (node) => node.innerText
-        )
-      )
-        .trim()
-        .toLowerCase();
-
-      const aircraftOperating = (
-        await flightCard.$eval(
-          ".NxR6-aircraft-badge > div",
-          (node) => node.innerText
-        )
-      ).trim();
-
-      const availableAirlineFlights = flights.filter(
-        (flight) => flight.airlineName.trim().toLowerCase() === airlineName
-      );
-
-      let exactFlight: {
-        airlineName: string;
-        flightNumber: string;
-      } = undefined;
-
-      if (availableAirlineFlights.length > 0) {
-        exactFlight = availableAirlineFlights.find(
-          (flight) =>
-            flight.flightNumber.trim().replace(/\D+/g, "") === flightNumber
-        );
+      if (nonSuitableTimesFound) {
+        break;
       }
 
-      if (
-        exactFlight !== undefined ||
-        aircraftOperating.includes(aircraftType) ||
-        operatedBy.includes(exactFlight?.airlineName.trim().toLowerCase())
-      ) {
-        flightThatOperatesTheAircraftFound = true;
+      for (const flightSegment of flightSegments) {
+        const airlineName = (
+          await flightSegment.$eval(
+            ".NxR6-plane-details > div:nth-child(1)",
+            (node) => node.textContent
+          )
+        )
+          .replace(/\d+/g, "")
+          .trim()
+          .toLowerCase();
+
+        const flightNumber = (
+          await flightSegment.$eval(
+            ".NxR6-plane-details > div:nth-child(1) > span",
+            (node) => node.textContent
+          )
+        ).trim();
+
+        const operatedBy = (
+          await flightSegment.$eval(
+            ".NxR6-plane-details > div:nth-child(2)",
+            (node) => node.textContent
+          )
+        )
+          .trim()
+          .toLowerCase();
+
+        const aircraftOperating = (
+          await flightSegment.$eval(
+            ".NxR6-aircraft-badge > div",
+            (node) => node.textContent
+          )
+        ).trim();
+
+        const availableAirlineFlights = flights.filter(
+          (flight) => flight.airlineName.trim().toLowerCase() === airlineName
+        );
+
+        let exactFlight: {
+          airlineName: string;
+          flightNumber: string;
+        } = undefined;
+
+        if (availableAirlineFlights.length > 0) {
+          exactFlight = availableAirlineFlights.find(
+            (flight) =>
+              flight.flightNumber.trim().replace(/\D+/g, "") === flightNumber
+          );
+        }
+
+        if (
+          exactFlight !== undefined ||
+          aircraftOperating.includes(aircraftType) ||
+          operatedBy.includes(exactFlight?.airlineName.trim().toLowerCase())
+        ) {
+          flightThatOperatesTheAircraftFound = true;
+        }
+
+        const flightTime = (
+          await flightSegment.$eval(".NxR6-time", (node) => node.textContent)
+        ).substring(0, 13);
+
+        const flightRoute = await flightSegment.$eval(
+          ".NxR6-airport",
+          (node) => node.textContent
+        );
+
+        const fullFlightNumber = await flightSegment.$eval(
+          ".NxR6-plane-details > div:nth-child(1)",
+          (node) => node.textContent
+        );
+
+        const badgeInfo = await flightSegment.$(".NxR6-badge");
+
+        if (
+          badgeInfo !== null &&
+          (await badgeInfo.evaluate((node) => node.textContent)) ===
+            "Train ride"
+        ) {
+          foundNonAircraftDeal = true;
+          break;
+        }
+
+        const aircraft = await flightSegment.$eval(
+          ".NxR6-aircraft-badge",
+          (node) => node.textContent
+        );
+
+        flightInfoArr.push({
+          flightTime,
+          flightRoute,
+          flightNumber: fullFlightNumber,
+          aircraft,
+        });
+      }
+
+      if (foundNonAircraftDeal) {
         break;
       }
     }
 
-    if (flightThatOperatesTheAircraftFound) {
+    if (flightThatOperatesTheAircraftFound && !foundNonAircraftDeal) {
       cheapestFlightPrice = await page.$eval(
         ".jnTP-display-price",
         (el) => el.textContent
@@ -692,12 +764,13 @@ async function obtainPrice(
       break;
     }
 
+    flightInfoArr.length = 0;
     await page.goBack();
   }
 
   if (cheapestFlightPrice !== null) {
     console.log("Found the cheapest price for the desired aircraft.");
-    return cheapestFlightPrice;
+    return { cheapestFlightPrice, flightInfoArr };
   } else {
     startIndex = foundPricesButtons.length;
     console.log("No prices have been found for the desired plane so far.");
@@ -714,6 +787,7 @@ async function obtainPrice(
         airportRotation,
         flights,
         singleFlightCheapestPriceUrl,
+        urlsToOpen,
         startIndex
       );
     } catch (error) {
@@ -722,11 +796,21 @@ async function obtainPrice(
   }
 }
 
-function createPriceObject(price: string, url: string): CheapestFlightPrice {
+function createPriceObject(
+  price: string,
+  url: string,
+  flightInfo: {
+    flightTime: string;
+    flightRoute: string;
+    flightNumber: string;
+    aircraft: string;
+  }[]
+): CheapestFlightPrice {
   return {
     date: saturdayIso,
     price: parseFloat(price.replace(/\D/g, "")),
     url: url,
+    flightInfo,
   };
 }
 
@@ -791,6 +875,13 @@ function generateTableRows(items: CheapestFlightPrice[]) {
             <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
               item.date
             ).toLocaleDateString("sr")}</td>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${item.flightInfo.map(
+              (flightInfoObj) =>
+                `<span>${flightInfoObj.flightNumber}</span><br>
+                 <span>${flightInfoObj.flightTime}</span><br>
+                 <span>${flightInfoObj.flightRoute}</span><br>
+                 <span>${flightInfoObj.aircraft}</span><br><br>`
+            )}</td>
             <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
               item.price
             }</td>
@@ -822,6 +913,7 @@ async function sendCheapestPricesEmail(cheapestPrices: CheapestFlightPrice[]) {
                   <thead>
                       <tr style="background-color: #f2f2f2;">
                           <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
+                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Flight info</th>
                           <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
                           <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
                       </tr>
