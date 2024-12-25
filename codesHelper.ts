@@ -29,10 +29,23 @@ async function obtainRotations() {
 
     for (const aircraftType of aircraftTypes) {
       await processAircraftType(browser, aircraftType);
+
+      if (airportRotations.length > 0 && flights.length > 0) {
+        await saveData(airportRotations, `rotations-${aircraftType}.json`);
+        await saveData(flights, `flights-${aircraftType}.json`);
+
+        airportRotations.length = 0;
+        flights.length = 0;
+
+        processedRotations.clear();
+        processedFlights.clear();
+      } else {
+        console.log(
+          "Unfortunately, no rotations or flights found for this aircraft type. Moving on..."
+        );
+      }
     }
 
-    await saveData(airportRotations, "rotations.json");
-    await saveData(flights, "flights.json");
     await browser.close();
 
     console.log(`Successfully added the airports. Let's go!`);
@@ -355,7 +368,39 @@ async function obtainRotations() {
     }
   }
 
-  retrieveRotationsForAircraftTypes(["A388"]);
+  retrieveRotationsForAircraftTypes([
+    "A306",
+    // "A30B",
+    // "A3ST",
+    // "A310",
+    // "A332",
+    // "A333",
+    // "A338",
+    // "A339",
+    // "A342",
+    // "A343",
+    // "A345",
+    // "A346",
+    // "A359",
+    // "A35K",
+    // "A388",
+    // "B741",
+    // "B742",
+    // "B743",
+    // "B744",
+    // "B748",
+    // "B762",
+    // "B763",
+    // "B764",
+    // "B772",
+    // "B773",
+    // "B779",
+    // "B77L",
+    // "B77W",
+    // "B788",
+    // "B789",
+    // "B78X",
+  ]);
 }
 
 obtainRotations();
