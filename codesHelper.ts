@@ -25,7 +25,7 @@ async function obtainRotations() {
       "This is going to be a long one, so you'd better make some popcorn and go watch your favorite movie."
     );
 
-    const browser = await launchBrowser(true);
+    const browser = await launchBrowser(false);
 
     for (const aircraftType of aircraftTypes) {
       await processAircraftType(browser, aircraftType);
@@ -33,22 +33,15 @@ async function obtainRotations() {
       if (airportRotations.length > 0 && flights.length > 0) {
         await saveData(airportRotations, `rotations-${aircraftType}.json`);
         await saveData(flights, `flights-${aircraftType}.json`);
-
-        airportRotations.length = 0;
-        flights.length = 0;
-
-        processedRotations.clear();
-        processedFlights.clear();
+        console.log(`Successfully added the airports and flights. Let's go!`);
       } else {
         console.log(
-          "Unfortunately, no rotations or flights found for this aircraft type. Moving on..."
+          "Unfortunately, no rotations or flights found for this aircraft type."
         );
       }
     }
 
     await browser.close();
-
-    console.log(`Successfully added the airports. Let's go!`);
   }
 
   async function processAircraftType(browser: Browser, aircraftType: string) {
@@ -236,6 +229,12 @@ async function obtainRotations() {
               flightNumber,
             };
 
+            console.log(
+              `This aircraft was in service at ${Math.round(
+                aircraftFrequency.aircraftFrequency
+              )}% of the total number of rotations for this flight, in the last week.`
+            );
+
             if (aircraftFrequency.isAircraftFrequent) {
               if (!processedRotations.has(rotation)) {
                 airportRotations.push(rotation);
@@ -243,11 +242,6 @@ async function obtainRotations() {
 
                 processedRotationsForThisAircraft++;
 
-                console.log(
-                  `This aircraft was in service at ${Math.round(
-                    aircraftFrequency.aircraftFrequency
-                  )}% of the total number of rotations for this flight, in the last week.`
-                );
                 console.log("Added the rotation.");
               } else {
                 console.log("Rotation already added. Skipped the rotation.");
@@ -277,11 +271,6 @@ async function obtainRotations() {
                 console.log("Flight already added. Skipped the flight.");
               }
             } else {
-              console.log(
-                `This aircraft was in service at ${Math.round(
-                  aircraftFrequency.aircraftFrequency
-                )}% of the total number of rotations for this flight, in the last week.`
-              );
               console.log("Not frequent enough. Skipped the rotation.");
             }
           }
@@ -349,7 +338,9 @@ async function obtainRotations() {
       const links: { aircraftReg: string; link: string }[] = [];
 
       for (const row of rows) {
-        const linkElement = await row.$("td:nth-child(2) > a");
+        const linkElement =
+          (await row.$("td:nth-child(2) > a")) ??
+          (await row.$("td:nth-child(3) > a"));
         if (linkElement) {
           const link = (await linkElement.evaluate((a) => a.href)).trim();
           const aircraftReg = (
@@ -369,7 +360,7 @@ async function obtainRotations() {
   }
 
   retrieveRotationsForAircraftTypes([
-    "A306",
+    // "A306",
     // "A30B",
     // "A3ST",
     // "A310",
@@ -381,8 +372,8 @@ async function obtainRotations() {
     // "A343",
     // "A345",
     // "A346",
-    // "A359",
-    // "A35K",
+    "A359",
+    "A35K",
     // "A388",
     // "B741",
     // "B742",
