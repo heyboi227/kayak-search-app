@@ -34,6 +34,9 @@ async function obtainRotations() {
         await saveData(airportRotations, `rotations-${aircraftType}.json`);
         await saveData(flights, `flights-${aircraftType}.json`);
         console.log(`Successfully added the airports and flights. Let's go!`);
+        
+        airportRotations.length = 0;
+        flights.length = 0;
       } else {
         console.log(
           "Unfortunately, no rotations or flights found for this aircraft type."
