@@ -27,3 +27,9 @@ export function delay(time: number) {
     setTimeout(resolve, time);
   });
 }
+
+export function containsExactMatch(text: string, search: string): boolean {
+  const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\b${escapedSearch}\\b`);
+  return pattern.test(text);
+}

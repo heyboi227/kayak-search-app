@@ -1,36 +1,35 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-      {
-        "type": "node",
-        "request": "launch",
-        "name": "Launch openTabsMultiDay",
-        "skipFiles": ["<node_internals>/**"],
-        "program": "${workspaceFolder}/openTabsMultiDay.ts",
-        "preLaunchTask": "tsc: build - tsconfig.json",  // Compiles TS before launch
-        "outFiles": ["${workspaceFolder}/dist/**/*.js"],  // Location of compiled JS files
-        "sourceMaps": true
-      },
-      {
-        "type": "node",
-        "request": "launch",
-        "name": "Launch openTabsSingleDay",
-        "skipFiles": ["<node_internals>/**"],
-        "program": "${workspaceFolder}/openTabsSingleDay.ts",
-        "preLaunchTask": "tsc: build - tsconfig.json",  // Compiles TS before launch
-        "outFiles": ["${workspaceFolder}/dist/**/*.js"],  // Location of compiled JS files
-        "sourceMaps": true
-      },
-      {
-        "type": "node",
-        "request": "launch",
-        "name": "Launch codesHelper",
-        "skipFiles": ["<node_internals>/**"],
-        "program": "${workspaceFolder}/codesHelper.ts",
-        "preLaunchTask": "tsc: build - tsconfig.json",  // Compiles TS before launch
-        "outFiles": ["${workspaceFolder}/dist/**/*.js"],  // Location of compiled JS files
-        "sourceMaps": true
-      }
-    ]
-  }
-  
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch openTabsFlexible",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/openTabsFlexible.ts",
+      "preLaunchTask": "tsc: build - tsconfig.json", // Compiles TS before launch
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"], // Location of compiled JS files
+      "sourceMaps": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch openTabsSingleDay",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/openTabsSingleDay.ts",
+      "preLaunchTask": "tsc: build - tsconfig.json", // Compiles TS before launch
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"], // Location of compiled JS files
+      "sourceMaps": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch codesHelper",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/codesHelper.ts",
+      "preLaunchTask": "tsc: build - tsconfig.json", // Compiles TS before launch
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"], // Location of compiled JS files
+      "sourceMaps": true
+    }
+  ]
+}
