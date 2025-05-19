@@ -65,7 +65,7 @@ async function obtainRotations() {
       (element) => element.innerHTML
     );
 
-    if (pageContent.includes("Verifying")) {
+    if (pageContent.includes("Verifying") || pageContent.includes("Error")) {
       await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
       await acceptCookiesAfterVerification(page);
     }
