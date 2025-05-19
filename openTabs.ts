@@ -23,15 +23,8 @@ type TwoFlightDate = {
   returnDate: string;
 };
 
-type ThreeFlightDate = {
-  departureDate: string;
-  midpointDate: string;
-  returnDate: string;
-};
-
 let cheapestFlightPrices: CheapestFlightPrice[] = [];
 
-const aircraftModel = "A350";
 const aircraftModelToOpen = "A359";
 const aircraftModelStringSearch = "A350-900";
 
@@ -116,13 +109,7 @@ async function main() {
     while (true) {
       const browser = await launchBrowser(false);
 
-      await processDateCombinations(
-        browser,
-        saturdayIso,
-        aircraftModel,
-        flights,
-        airportRotationsSet
-      );
+      await lookForFlights(browser, saturdayIso, flights, airportRotationsSet);
 
       await browser.close();
 
@@ -165,16 +152,17 @@ async function prepareRotations(
       }
     });
 
-    airportRotationsSet.add(splitAirportRotation.join("-"));
+    splitAirportRotation.forEach((airportRotation) =>
+      airportRotationsSet.add(airportRotation)
+    );
   }
 
   return airportRotationsSet;
 }
 
-async function processDateCombinations(
+async function lookForFlights(
   browser: Browser,
   saturdayIso: string,
-  aircraftModel: string,
   flights: { airlineName: string; flightNumber: string }[],
   airportRotationsSet: Set<string>
 ) {
@@ -182,7 +170,6 @@ async function processDateCombinations(
 
   const allDates = dateCombinations.flatMap((flight) => [
     flight.departureDate,
-    flight.midpointDate,
     flight.returnDate,
   ]);
 
@@ -201,10 +188,7 @@ async function processDateCombinations(
     .join("");
 
   for (const airportRotation of airportRotationsSet) {
-    const midpoints = airportRotation.split("-");
-
-    const firstMidpoint = midpoints[0];
-    const secondMidpoint = midpoints[1];
+    if (airportRotation === homeAirport) continue;
 
     for (const dateCombination of dateCombinations) {
       let departOrLandingTimeProps: string[] = [];
@@ -224,21 +208,7 @@ async function processDateCombinations(
 
       const departOrLandingTimePropsStr = departOrLandingTimeProps.join(";");
 
-      let url = "";
-
-      if (midpoints.includes(homeAirport)) {
-        url = `https://www.kayak.ie/flights/${homeAirport}-${
-          firstMidpoint === homeAirport ? secondMidpoint : firstMidpoint
-        }/${dateCombination.departureDate}/${
-          firstMidpoint === homeAirport ? secondMidpoint : firstMidpoint
-        }-${homeAirport}/${
-          dateCombination.returnDate
-        }?fs=${departOrLandingTimePropsStr};baditin=baditin&sort=price_a`;
-      } else if (firstMidpoint === secondMidpoint) {
-        url = `https://www.kayak.ie/flights/${homeAirport}-${firstMidpoint}/${dateCombination.departureDate}/${dateCombination.returnDate}?fs=${departOrLandingTimePropsStr};baditin=baditin&sort=price_a`;
-      } else {
-        url = `https://www.kayak.ie/flights/${homeAirport}-${firstMidpoint}/${dateCombination.departureDate}/${airportRotation}/${dateCombination.midpointDate}/${secondMidpoint}-${homeAirport}/${dateCombination.returnDate}?fs=${departOrLandingTimePropsStr};baditin=baditin&sort=price_a`;
-      }
+      const url = `https://www.kayak.ie/flights/${homeAirport}-${airportRotation}/${dateCombination.departureDate}/${dateCombination.returnDate}?fs=${departOrLandingTimePropsStr};baditin=baditin&sort=price_a`;
 
       try {
         let page = await openPage(
@@ -317,15 +287,13 @@ async function processDateCombinations(
 
           console.log(`Looking for prices at: ${page.url()}.`);
 
-          const cheapestFlightPrice =
-            await obtainPriceForDateCombinationsAndFlexibleDates(
-              browser,
-              page,
-              aircraftModel,
-              null,
-              flights,
-              true
-            );
+          const cheapestFlightPrice = await obtainPrice(
+            browser,
+            page,
+            null,
+            flights,
+            true
+          );
 
           if (
             cheapestFlightPrice !== null &&
@@ -417,39 +385,31 @@ function getDates(baseDate: Date): string[] {
   return dates;
 }
 
-function generateDateCombinations(inputDate: string): ThreeFlightDate[] {
+function generateDateCombinations(inputDate: string): TwoFlightDate[] {
   const date = new Date(inputDate);
 
   const departureDates = getDates(date);
-  const midpointDates = getDates(date);
   const returnDates = getDates(date);
 
-  const combinations: ThreeFlightDate[] = [];
+  const combinations: TwoFlightDate[] = [];
 
   // Generate valid combinations
   for (const departureDate of departureDates) {
-    for (const midpointDate of midpointDates) {
-      for (const returnDate of returnDates) {
-        if (
-          new Date(midpointDate) >= new Date(departureDate) &&
-          new Date(returnDate) >= new Date(midpointDate)
-        )
-          combinations.push({
-            departureDate,
-            midpointDate,
-            returnDate,
-          });
-      }
+    for (const returnDate of returnDates) {
+      if (new Date(returnDate) >= new Date(departureDate))
+        combinations.push({
+          departureDate,
+          returnDate,
+        });
     }
   }
 
   return combinations;
 }
 
-async function obtainPriceForDateCombinationsAndFlexibleDates(
+async function obtainPrice(
   browser: Browser,
   page: Page,
-  aircraftType: string,
   cheapestFlightPrice: string,
   flights: { airlineName: string; flightNumber: string }[],
   firstSearch: boolean,
@@ -705,10 +665,9 @@ async function obtainPriceForDateCombinationsAndFlexibleDates(
       await page.click(".show-more-button");
       await page.waitForNavigation({ waitUntil: "networkidle2" });
 
-      return await obtainPriceForDateCombinationsAndFlexibleDates(
+      return await obtainPrice(
         browser,
         page,
-        aircraftType,
         cheapestFlightPrice,
         flights,
         false,

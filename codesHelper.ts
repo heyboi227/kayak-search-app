@@ -34,7 +34,7 @@ async function obtainRotations() {
         await saveData(airportRotations, `rotations-${aircraftType}.json`);
         await saveData(flights, `flights-${aircraftType}.json`);
         console.log(`Successfully added the airports and flights. Let's go!`);
-        
+
         airportRotations.length = 0;
         flights.length = 0;
       } else {
@@ -53,7 +53,7 @@ async function obtainRotations() {
 
   async function acceptCookiesAfterVerification(page: Page) {
     try {
-      await page.click("#onetrust-accept-btn-handler");
+      await page.click("#didomi-notice-agree-button > span");
       console.log("Accepted all cookies, unfortunately.");
       await delay(1500);
     } catch {}
@@ -164,7 +164,7 @@ async function obtainRotations() {
 
     return {
       aircraftFrequency: percentage,
-      isAircraftFrequent: percentage >= 50,
+      isAircraftFrequent: percentage >= 70,
       airlineName,
     };
   }
@@ -238,18 +238,18 @@ async function obtainRotations() {
               )}% of the total number of rotations for this flight, in the last week.`
             );
 
+            if (!processedRotations.has(rotation)) {
+              airportRotations.push(rotation);
+              processedRotations.add(rotation);
+
+              processedRotationsForThisAircraft++;
+
+              console.log("Added the rotation.");
+            } else {
+              console.log("Rotation already added. Skipped the rotation.");
+            }
+
             if (aircraftFrequency.isAircraftFrequent) {
-              if (!processedRotations.has(rotation)) {
-                airportRotations.push(rotation);
-                processedRotations.add(rotation);
-
-                processedRotationsForThisAircraft++;
-
-                console.log("Added the rotation.");
-              } else {
-                console.log("Rotation already added. Skipped the rotation.");
-              }
-
               let setHasEquivalentFlightNumberObj = false;
 
               for (const flight of processedFlights) {
@@ -274,7 +274,7 @@ async function obtainRotations() {
                 console.log("Flight already added. Skipped the flight.");
               }
             } else {
-              console.log("Not frequent enough. Skipped the rotation.");
+              console.log("Not frequent enough. Skipped the flight.");
             }
           }
         }
@@ -323,7 +323,7 @@ async function obtainRotations() {
 
       if (!cookiesAccepted) {
         try {
-          await page.click("#onetrust-accept-btn-handler");
+          await page.click("#didomi-notice-agree-button > span");
           console.log("Accepted all cookies, unfortunately.");
           cookiesAccepted = true;
         } catch {
@@ -375,8 +375,8 @@ async function obtainRotations() {
     // "A343",
     // "A345",
     // "A346",
-    // "A359",
-    // "A35K",
+    "A359",
+    "A35K",
     "A388",
     // "B741",
     // "B742",
