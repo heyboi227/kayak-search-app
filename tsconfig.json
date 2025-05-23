@@ -3,6 +3,7 @@
     "target": "es6",
     "module": "commonjs",
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "sourceMap": true, // Enable source map support
     "outDir": "./dist", // Output directory for compiled files
     "typeRoots": ["./node_modules/@types", "./@types"]

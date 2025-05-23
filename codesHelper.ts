@@ -59,14 +59,24 @@ async function obtainRotations() {
     } catch {}
   }
 
-  async function waitForVerification(page: Page): Promise<Page> {
+  async function waitForVerification(
+    browser: Browser,
+    page: Page,
+    url: string
+  ): Promise<Page> {
     const pageContent = await page.$eval(
       "html",
       (element) => element.innerHTML
     );
 
-    if (pageContent.includes("Verifying") || pageContent.includes("Error")) {
+    if (
+      pageContent.includes("Verifying") ||
+      pageContent.includes("Error") ||
+      pageContent.includes("Cloudfare")
+    ) {
+      await page.close();
       await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
+      page = await openPage(browser, url, new UserAgent().toString());
       await acceptCookiesAfterVerification(page);
     }
 
@@ -100,7 +110,7 @@ async function obtainRotations() {
       new UserAgent().toString()
     );
 
-    detailPage = await waitForVerification(detailPage);
+    detailPage = await waitForVerification(browser, detailPage, link.link);
 
     try {
       await extractAirportRotations(browser, detailPage, aircraftType);
@@ -123,7 +133,7 @@ async function obtainRotations() {
   }> {
     let page = await openPage(browser, url, new UserAgent().toString());
 
-    page = await waitForVerification(page);
+    page = await waitForVerification(browser, page, url);
 
     const detailTable = await page.$("#tbl-datatable");
     if (detailTable === null) return null;
@@ -375,8 +385,8 @@ async function obtainRotations() {
     // "A343",
     // "A345",
     // "A346",
-    "A359",
-    "A35K",
+    // "A359",
+    // "A35K",
     "A388",
     // "B741",
     // "B742",

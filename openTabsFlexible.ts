@@ -6,7 +6,7 @@ import { containsExactMatch, delay, loadData } from "./helpers";
 import { restrictedAirports } from "./restrictedAirports";
 import UserAgent from "user-agents";
 
-type CheapestFlightPrice = {
+type CheapestMainFlightPrice = {
   date: string;
   price: number;
   url: string;
@@ -18,8 +18,22 @@ type CheapestFlightPrice = {
   };
 };
 
-let cheapestFlightPrices: CheapestFlightPrice[] = [];
+type CheapestAdjacentFlightPrice = {
+  date: string;
+  price: number;
+  url: string;
+  flightInfo: {
+    flightTime: string;
+    flightRoute: string;
+    flightNumber: string;
+    aircraft: string;
+  }[];
+};
 
+let mainCheapestFlightPrices: CheapestMainFlightPrice[] = [];
+let adjacentCheapestFlightPrices: CheapestAdjacentFlightPrice[] = [];
+
+const aircraftModel = "A380"; // aircraft model value in the Kayak string search
 const aircraftModelToOpen = "A388"; // aircraft model value JSON file suffix
 const aircraftModelStringSearch = "A380-800"; // aircraft model substring value to search in flights
 
@@ -75,10 +89,7 @@ const cityCodesForMultipleAirports = {
   THR: ["IKA", "THR"],
 };
 
-const homeAirportCode: string = "BEG";
-
-let wantedDepartDateIso = "2025-09-17";
-let wantedReturnDateIso = "2025-09-23";
+let wantedStartDateIso = "2025-09-20";
 
 const userAgent = new UserAgent({
   deviceCategory: "desktop",
@@ -106,19 +117,27 @@ async function main() {
       airportRotation: string;
     }[] = [];
 
-    await prepareUrls(
-      airportRotations,
-      restrictedAirportCodes,
-      wantedDepartDateIso,
-      wantedReturnDateIso,
-      urlsToOpen
-    );
+    while (
+      new Date(wantedStartDateIso).getTime() < new Date("2026-01-01").getTime()
+    ) {
+      await prepareUrls(
+        airportRotations,
+        restrictedAirportCodes,
+        wantedStartDateIso,
+        urlsToOpen
+      );
 
-    const browser = await launchBrowser(false);
+      const browser = await launchBrowser(false);
 
-    await lookForFlights(urlsToOpen, flights, browser);
+      await lookForFlights(urlsToOpen, flights, browser);
 
-    await browser.close();
+      await browser.close();
+
+      const newWantedStartDate = new Date(wantedStartDateIso);
+      newWantedStartDate.setDate(newWantedStartDate.getDate() + 6);
+
+      wantedStartDateIso = newWantedStartDate.toISOString().substring(0, 10);
+    }
   } catch (error) {
     console.error("An error occurred in the main function.", error);
   }
@@ -127,8 +146,7 @@ async function main() {
 async function prepareUrls(
   airportRotations: string[],
   restrictedAirportCodes: string[],
-  wantedDepartDateIso: string,
-  wantedReturnDateIso: string,
+  wantedStartDateIso: string,
   mainUrlsToOpen: {
     url: string;
     dateIso: string;
@@ -163,13 +181,11 @@ async function prepareUrls(
       }
     });
 
-    splitAirportRotation.forEach((airportRotation) =>
-      airportRotationsSet.add(airportRotation)
-    );
+    airportRotationsSet.add(splitAirportRotation.join("-"));
   }
 
   for (const airportRotation of airportRotationsSet) {
-    const departUrl = `https://www.kayak.ie/flights/BEG-${airportRotation}/${wantedDepartDateIso}-flexible-3days/${wantedReturnDateIso}-flexible-3days?fs=bfc=1&sort=price_a`;
+    const departUrl = `https://www.kayak.ie/flights/${airportRotation}/${wantedStartDateIso}-flexible-3days?fs=stops=~0;eqmodel=~${aircraftModel};bfc=1&sort=price_a`;
 
     const urls: {
       url: string;
@@ -178,7 +194,7 @@ async function prepareUrls(
     }[] = [
       {
         url: departUrl,
-        dateIso: wantedDepartDateIso,
+        dateIso: wantedStartDateIso,
         airportRotation,
       },
     ];
@@ -198,14 +214,19 @@ async function lookForFlights(
   browser: Browser,
   startIndex: number = 0
 ) {
-  let cheapestFlightPriceFound: number = Infinity;
+  let cheapestMainFlightPriceFound: number = Infinity;
 
   const userAgent =
     userAgents[Math.floor(Math.random() * userAgents.length)].toString();
 
   try {
     for (let i = 0; i < urlsToOpen.slice(startIndex).length; i++) {
-      if (urlsToOpen[i].airportRotation === homeAirportCode) continue;
+      if (
+        urlsToOpen[i].airportRotation.split("-")[0] ===
+        urlsToOpen[i].airportRotation.split("-")[1]
+      ) {
+        continue;
+      }
 
       let page = await openPage(browser, urlsToOpen[i].url, userAgent);
 
@@ -286,7 +307,7 @@ async function lookForFlights(
 
       if (!page.isClosed()) {
         await page.bringToFront();
-        const cheapestFlightPrice = await obtainPriceForRotation(
+        const mainFlightCheapestFlightPrice = await obtainPriceForMainRotation(
           browser,
           page,
           flights,
@@ -294,31 +315,36 @@ async function lookForFlights(
           urlsToOpen[i].airportRotation
         );
 
-        if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
-          let flightPriceObj = createMainPriceObject(
-            cheapestFlightPrice.mainFlightBaseDateIso,
-            cheapestFlightPrice.cheapestFlightPrice,
+        if (
+          mainFlightCheapestFlightPrice !== null &&
+          mainFlightCheapestFlightPrice !== undefined
+        ) {
+          let mainFlightPriceObj = createMainPriceObject(
+            mainFlightCheapestFlightPrice.mainFlightBaseDateIso,
+            mainFlightCheapestFlightPrice.cheapestFlightPrice,
             urlsToOpen[i].url,
-            cheapestFlightPrice.flightInfoObj
+            mainFlightCheapestFlightPrice.flightInfoObj
           );
 
-          if (flightPriceObj.price < cheapestFlightPriceFound) {
-            cheapestFlightPriceFound = flightPriceObj.price;
+          if (mainFlightPriceObj.price < cheapestMainFlightPriceFound) {
+            cheapestMainFlightPriceFound = mainFlightPriceObj.price;
           }
 
           await delay(Math.floor(Math.random() * 5000 + 5000));
 
-          cheapestFlightPrices.push(flightPriceObj);
+          mainCheapestFlightPrices.push(mainFlightPriceObj);
 
-          console.log("Found the cheapest flight price for this rotation.");
-        }
-
-        if (cheapestFlightPrices.length > 0) {
-          await sendCheapestPricesEmail();
-          cheapestFlightPrices.length = 0;
-        } else {
           console.log(
-            "Wasn't able to find any prices for this rotation. Moving on..."
+            "Found the cheapest main flight price. Trying to obtain prices from adjacent flights..."
+          );
+
+          await lookForAdjacentFlights(
+            urlsToOpen[i],
+            mainFlightCheapestFlightPrice.mainFlightDateIso,
+            mainFlightCheapestFlightPrice.mainFlightDateIso,
+            mainFlightCheapestFlightPrice.dateTime,
+            2 * 60 * 60 * 1000,
+            browser
           );
         }
 
@@ -327,6 +353,189 @@ async function lookForFlights(
     }
   } catch (error) {
     console.log("An error occured.", error);
+  }
+}
+
+async function lookForAdjacentFlights(
+  flightInfo: {
+    url: string;
+    dateIso: string;
+    airportRotation: string;
+  },
+  mainFlightDateIso: string,
+  dateIso: string,
+  dateTime: string,
+  timeCheck: number,
+  browser: Browser
+) {
+  const links: {
+    url: string;
+    flightType: "depart" | "return";
+    dateIso: string;
+    airportRotation: string;
+  }[] = [];
+
+  let departUrl = "";
+  let returnUrl = "";
+
+  const departFlexibleDate = new Date(dateIso);
+  departFlexibleDate.setDate(departFlexibleDate.getDate() - 3);
+
+  const departFlexibleDateIso = departFlexibleDate
+    .toISOString()
+    .substring(0, 10);
+
+  const returnFlexibleDate = new Date(dateIso);
+  returnFlexibleDate.setDate(returnFlexibleDate.getDate() + 3);
+
+  const returnFlexibleDateIso = returnFlexibleDate
+    .toISOString()
+    .substring(0, 10);
+
+  const departDateEarlierThanToday =
+    new Date(departFlexibleDate).getTime() < new Date().getTime();
+
+  const returnDateEarlierThanToday =
+    new Date(returnFlexibleDate).getTime() < new Date().getTime();
+
+  departUrl = `https://www.kayak.ie/flights/BEG-${
+    flightInfo.airportRotation.split("-")[0]
+  }/${
+    departDateEarlierThanToday ? wantedStartDateIso : departFlexibleDateIso
+  }-flexible-3days?fs=bfc=1;layoverdur=-360&sort=price_a`;
+
+  returnUrl = `https://www.kayak.ie/flights/${
+    flightInfo.airportRotation.split("-")[1]
+  }-BEG/${
+    returnDateEarlierThanToday ? wantedStartDateIso : returnFlexibleDateIso
+  }-flexible-3days?fs=bfc=1;layoverdur=-360&sort=price_a`;
+
+  links.push({
+    url: departUrl,
+    flightType: "depart",
+    dateIso: departDateEarlierThanToday
+      ? wantedStartDateIso
+      : departFlexibleDateIso,
+    airportRotation: flightInfo.airportRotation,
+  });
+  links.push({
+    url: returnUrl,
+    flightType: "return",
+    dateIso: returnDateEarlierThanToday
+      ? wantedStartDateIso
+      : returnFlexibleDateIso,
+    airportRotation: flightInfo.airportRotation,
+  });
+
+  try {
+    for (const link of links) {
+      const page = await openPage(
+        browser,
+        link.url,
+        userAgents[Math.floor(Math.random() * userAgents.length)].toString()
+      );
+      console.log(`Opened URL at: ${link.url}.`);
+
+      await handleCaptcha(page, link.url);
+
+      const cookies = await browser.cookies();
+      await browser.setCookie(...cookies);
+
+      await delay(500);
+      await acceptCookies(page);
+
+      const firstSelector = page
+        .waitForSelector(".c8MCw-header-text")
+        .catch(() => null);
+
+      const secondSelector = page
+        .waitForSelector(".IVAL-title")
+        .catch(() => null);
+
+      const result = await Promise.race([firstSelector, secondSelector]);
+
+      if (result) {
+        const headerText = await page
+          .$eval(".c8MCw-header-text", (el) => el.textContent)
+          .catch(() => null);
+
+        const titleText = await page
+          .$eval(".IVAL-title", (el) => el.textContent)
+          .catch(() => null);
+
+        if (
+          (headerText &&
+            (headerText.includes("No matching results found") ||
+              headerText.includes("No matching flights found"))) ||
+          titleText
+        ) {
+          console.log("No prices available. Proceeding to the next link.");
+          await page.close();
+        }
+      }
+
+      await delay(Math.floor(Math.random() * 5000 + 40000));
+
+      if (!page.isClosed()) {
+        if (Math.random() > 0.5) {
+          await page.goBack();
+          await delay(2000);
+          await page.goForward();
+        }
+
+        if (Math.random() > 0.5) {
+          await simulateMouseMovement(page);
+        }
+
+        if (Math.random() > 0.5) {
+          const newPage = await browser.newPage();
+          await newPage.goto("https://www.google.com");
+          await delay(Math.random() * 5000 + 2000);
+          await newPage.close();
+        }
+
+        const cheapestFlightPrice = await obtainPriceForAdjacentFlight(
+          links[links.indexOf(link)],
+          browser,
+          page,
+          mainFlightDateIso,
+          link.dateIso,
+          dateTime,
+          link.flightType,
+          timeCheck,
+          links.indexOf(link)
+        );
+
+        if (cheapestFlightPrice !== null && cheapestFlightPrice !== undefined) {
+          const priceObj = createAdjacentPriceObject(
+            cheapestFlightPrice.adjacentFlightBaseDateIso,
+            cheapestFlightPrice.cheapestFlightPrice,
+            link.url,
+            cheapestFlightPrice.flightInfoArr
+          );
+          adjacentCheapestFlightPrices.push(priceObj);
+          console.log("Added the adjacent flight's price.");
+        }
+
+        await page.close();
+      }
+    }
+    await delay(Math.floor(Math.random() * 5000 + 5000));
+  } catch (error) {
+    console.log("An error occured.", error);
+  }
+
+  if (
+    mainCheapestFlightPrices.length > 0 &&
+    adjacentCheapestFlightPrices.length > 0
+  ) {
+    await sendCheapestPricesEmail();
+    mainCheapestFlightPrices.length = 0;
+    adjacentCheapestFlightPrices.length = 0;
+  } else {
+    console.log(
+      "Wasn't able to find any prices for this rotation. Moving on..."
+    );
   }
 }
 
@@ -367,7 +576,7 @@ async function handleCaptcha(page: Page, pageUrl: string) {
   return page;
 }
 
-async function obtainPriceForRotation(
+async function obtainPriceForMainRotation(
   browser: Browser,
   page: Page,
   flights: { airlineName: string; flightNumber: string }[],
@@ -603,6 +812,368 @@ async function obtainPriceForRotation(
   }
 }
 
+async function obtainPriceForAdjacentFlight(
+  flightInfo: {
+    url: string;
+    flightType: "depart" | "return";
+    dateIso: string;
+    airportRotation: string;
+  },
+  browser: Browser,
+  page: Page,
+  mainFlightDateIso: string,
+  dateIso: string,
+  dateTime: string,
+  flightType: "depart" | "return",
+  timeCheck: number,
+  startIndex: number = 0,
+  buttonsStartIndex: number = 0
+) {
+  let foundPricesButtons: ElementHandle<HTMLAnchorElement>[] = [];
+
+  foundPricesButtons = (await page.$$(
+    ".oVHK > .Iqt3"
+  )) as ElementHandle<HTMLAnchorElement>[];
+
+  let buttonsFetchAttempts = 0;
+
+  while (foundPricesButtons.length === 0) {
+    ++buttonsFetchAttempts;
+
+    await page.reload();
+    await delay(Math.floor(Math.random() * 5000 + 40000));
+
+    foundPricesButtons = (await page.$$(
+      ".oVHK > .Iqt3"
+    )) as ElementHandle<HTMLAnchorElement>[];
+
+    if (buttonsFetchAttempts === 3) {
+      break;
+    }
+  }
+
+  if (foundPricesButtons.length === 0) {
+    await page.close();
+    await lookForAdjacentFlights(
+      flightInfo,
+      mainFlightDateIso,
+      dateIso,
+      dateTime,
+      timeCheck,
+      browser
+    );
+  }
+
+  let cheapestFlightPrice: string = null;
+
+  let adjacentFlightDateIso: string = "";
+  let adjacentFlightBaseDateIso: string = "";
+
+  let flightInfoArr: {
+    flightTime: string;
+    flightRoute: string;
+    flightNumber: string;
+    aircraft: string;
+  }[] = [];
+
+  for (const foundPricesButton of foundPricesButtons.slice(buttonsStartIndex)) {
+    try {
+      const innerText = await foundPricesButton.evaluate(
+        (btn) => btn.textContent
+      );
+
+      let foundNonAircraftDeal = false;
+
+      if (innerText === "View Deal") continue;
+
+      await foundPricesButton.evaluate((btn) => btn.click());
+      await page.waitForNavigation({ waitUntil: "networkidle2" });
+
+      await delay(5000);
+
+      const flightCard = await page.$(".E69K-leg-wrapper");
+
+      const flightSegments = await flightCard.$$(".NxR6-segment");
+
+      for (const flightSegment of flightSegments) {
+        const flightTime = (
+          await flightSegment.$eval(".NxR6-time", (node) => node.textContent)
+        ).substring(0, 13);
+
+        const flightRoute = await flightSegment.$eval(
+          ".NxR6-airport",
+          (node) => node.textContent
+        );
+
+        const flightNumber = await flightSegment.$eval(
+          ".NxR6-plane-details > div:nth-child(1)",
+          (node) => node.textContent
+        );
+
+        const badgeInfo = await flightSegment.$(".NxR6-badge");
+
+        if (
+          badgeInfo !== null &&
+          (await badgeInfo.evaluate((node) => node.textContent)) ===
+            "Train ride"
+        ) {
+          foundNonAircraftDeal = true;
+          break;
+        }
+
+        let aircraft = "";
+
+        if ((await flightSegment.$(".NxR6-aircraft-badge")) !== null)
+          aircraft = await flightSegment.$eval(
+            ".NxR6-aircraft-badge",
+            (node) => node.textContent
+          );
+
+        flightInfoArr.push({
+          flightTime,
+          flightRoute,
+          flightNumber,
+          aircraft,
+        });
+      }
+
+      if (foundNonAircraftDeal) {
+        await page.goBack();
+        continue;
+      }
+
+      const firstLegFlightSegment = flightSegments[0];
+      const lastLegFlightSegment = flightSegments[flightSegments.length - 1];
+
+      const routeAndDateString = await flightCard.$eval(
+        ".c2x94-title",
+        (node) => node.textContent
+      );
+
+      let flightDate = routeAndDateString.substring(9);
+
+      let baseDate = new Date(`${flightDate} ${new Date().getFullYear()}`);
+      baseDate.setHours(12);
+
+      if (baseDate.getTime() < new Date().getTime()) {
+        baseDate = new Date(`${flightDate} ${new Date().getFullYear() + 1}`);
+        baseDate.setHours(12);
+      }
+
+      adjacentFlightBaseDateIso = baseDate.toISOString().substring(0, 10);
+
+      for (const flightSegment of flightSegments) {
+        const dateWarning = await flightSegment.$(".NxR6-date-warning");
+
+        if (dateWarning !== null) {
+          const dateWarningText = await dateWarning.evaluate(
+            (node) => node.textContent
+          );
+          flightDate = dateWarningText.trim().substring(8);
+        }
+      }
+
+      const currentYear = new Date().getFullYear();
+
+      const now = new Date();
+
+      let date = new Date(`${flightDate} ${currentYear}`);
+      date.setHours(12);
+
+      if (date.getTime() < now.getTime()) {
+        date = new Date(`${flightDate} ${currentYear + 1}`);
+        date.setHours(12);
+      }
+
+      adjacentFlightDateIso = date.toISOString().substring(0, 10);
+
+      const firstLegFlightSegmentDepartureTime = (
+        await firstLegFlightSegment.$eval(
+          ".NxR6-time",
+          (node) => node.textContent
+        )
+      )
+        .trim()
+        .substring(0, 5);
+
+      const lastLegFlightSegmentArrivalTime = (
+        await lastLegFlightSegment.$eval(
+          ".NxR6-time",
+          (node) => node.textContent
+        )
+      )
+        .trim()
+        .substring(8, 13);
+
+      if (flightInfo.flightType === flightType) {
+        if (flightInfo.flightType === "depart") {
+          const [mainFlightDepartHours, mainFlightDepartMinutes] = dateTime
+            .substring(0, 5)
+            .split(":")
+            .map(Number);
+
+          const [adjacentFlightArrivalHours, adjacentFlightArrivalMinutes] =
+            lastLegFlightSegmentArrivalTime.split(":").map(Number);
+
+          const mainFlightDepartureTimeDate = new Date(mainFlightDateIso);
+          const adjacentFlightArrivalTimeDate = new Date(adjacentFlightDateIso);
+
+          mainFlightDepartureTimeDate.setHours(
+            mainFlightDepartHours,
+            mainFlightDepartMinutes
+          );
+          adjacentFlightArrivalTimeDate.setHours(
+            adjacentFlightArrivalHours,
+            adjacentFlightArrivalMinutes
+          );
+
+          if (adjacentFlightArrivalTimeDate > mainFlightDepartureTimeDate) {
+            flightInfoArr.length = 0;
+            await page.goBack();
+            continue;
+          }
+
+          const mainFlightDepartureTimeToMilliseconds =
+            mainFlightDepartureTimeDate.getTime();
+          const adjacentFlightArrivalTimeDateToMilliseconds =
+            adjacentFlightArrivalTimeDate.getTime();
+
+          if (
+            mainFlightDepartureTimeToMilliseconds -
+              adjacentFlightArrivalTimeDateToMilliseconds >=
+            timeCheck
+          ) {
+            cheapestFlightPrice = await page.$eval(
+              ".jnTP-display-price",
+              (el) => el.textContent
+            );
+            break;
+          }
+        } else {
+          const [mainFlightReturnHours, mainFlightReturnMinutes] = dateTime
+            .substring(8, 13)
+            .split(":")
+            .map(Number);
+
+          const [adjacentFlightDepartureHours, adjacentFlightDepartureMinutes] =
+            firstLegFlightSegmentDepartureTime.split(":").map(Number);
+
+          const mainFlightReturnTimeDate = new Date(mainFlightDateIso);
+          const adjacentFlightDepartureTimeDate = new Date(
+            adjacentFlightDateIso
+          );
+
+          mainFlightReturnTimeDate.setHours(
+            mainFlightReturnHours,
+            mainFlightReturnMinutes
+          );
+          adjacentFlightDepartureTimeDate.setHours(
+            adjacentFlightDepartureHours,
+            adjacentFlightDepartureMinutes
+          );
+
+          if (adjacentFlightDepartureTimeDate < mainFlightReturnTimeDate) {
+            flightInfoArr.length = 0;
+            await page.goBack();
+            continue;
+          }
+
+          const mainFlightReturnTimeToMilliseconds =
+            mainFlightReturnTimeDate.getTime();
+          const adjacentFlightDepartureTimeDateToMilliseconds =
+            adjacentFlightDepartureTimeDate.getTime();
+
+          if (
+            adjacentFlightDepartureTimeDateToMilliseconds -
+              mainFlightReturnTimeToMilliseconds >=
+            timeCheck
+          ) {
+            cheapestFlightPrice = await page.$eval(
+              ".jnTP-display-price",
+              (el) => el.textContent
+            );
+            break;
+          }
+        }
+      } else {
+        cheapestFlightPrice = await page.$eval(
+          ".jnTP-display-price",
+          (el) => el.textContent
+        );
+        break;
+      }
+
+      flightInfoArr.length = 0;
+      await page.goBack();
+    } catch (error) {
+      console.log("An error occurred.", error);
+    }
+  }
+
+  if (cheapestFlightPrice !== null) {
+    return {
+      cheapestFlightPrice,
+      adjacentFlightBaseDateIso,
+      dateTime,
+      flightInfoArr,
+    };
+  } else {
+    buttonsStartIndex = foundPricesButtons.length;
+    flightInfoArr.length = 0;
+    console.log("No prices have been found for the desired plane so far.");
+    console.log("Trying to fetch more prices...");
+    try {
+      await page.click(".show-more-button");
+      await page.waitForNavigation({ waitUntil: "networkidle2" });
+
+      return await obtainPriceForAdjacentFlight(
+        flightInfo,
+        browser,
+        page,
+        mainFlightDateIso,
+        dateIso,
+        dateTime,
+        flightType,
+        timeCheck,
+        startIndex,
+        buttonsStartIndex
+      );
+    } catch (error) {
+      console.log("No more prices available.");
+
+      let date = new Date(adjacentFlightBaseDateIso);
+
+      if (flightType === "depart") {
+        date.setDate(date.getDate() - 6);
+      } else {
+        date.setDate(date.getDate() + 6);
+      }
+
+      if (date.getTime() < new Date().getTime()) {
+        date = new Date();
+      }
+
+      date.setHours(12);
+
+      const newDateIso = date.toISOString().substring(0, 10);
+
+      adjacentCheapestFlightPrices.length = 0;
+      flightInfoArr.length = 0;
+
+      await page.close();
+
+      await lookForAdjacentFlights(
+        flightInfo,
+        mainFlightDateIso,
+        newDateIso,
+        dateTime,
+        0,
+        browser
+      );
+    }
+  }
+}
+
 function createMainPriceObject(
   date: string,
   price: string,
@@ -613,7 +1184,26 @@ function createMainPriceObject(
     flightNumber: string;
     aircraft: string;
   }
-): CheapestFlightPrice {
+): CheapestMainFlightPrice {
+  return {
+    date,
+    price: parseFloat(price.replace(/\D/g, "")),
+    url,
+    flightInfo,
+  };
+}
+
+function createAdjacentPriceObject(
+  date: string,
+  price: string,
+  url: string,
+  flightInfo: {
+    flightTime: string;
+    flightRoute: string;
+    flightNumber: string;
+    aircraft: string;
+  }[]
+): CheapestAdjacentFlightPrice {
   return {
     date,
     price: parseFloat(price.replace(/\D/g, "")),
@@ -676,7 +1266,7 @@ async function sendMail(to: string, subject: string, message: string) {
   }
 }
 
-function generateFlightTableRows(items: CheapestFlightPrice[]) {
+function generateMainFlightTableRows(items: CheapestMainFlightPrice[]) {
   return items.map(
     (item) => `
         <tr>
@@ -699,11 +1289,37 @@ function generateFlightTableRows(items: CheapestFlightPrice[]) {
   );
 }
 
-async function sendCheapestPricesEmail() {
-  const totalPrice = cheapestFlightPrices.reduce(
-    (prev, curr) => prev + curr.price,
-    0
+function generateAdjacentFlightTableRows(items: CheapestAdjacentFlightPrice[]) {
+  return items.map(
+    (item) => `
+        <tr>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
+              item.date
+            ).toLocaleDateString("sr")}</td>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${item.flightInfo
+              .map(
+                (flightInfoObj) =>
+                  `<span>${flightInfoObj.flightNumber}</span><br>
+                 <span>${flightInfoObj.flightTime}</span><br>
+                 <span>${flightInfoObj.flightRoute}</span><br>
+                 <span>${flightInfoObj.aircraft}</span><br><br>`
+              )
+              .join("")}</td>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
+              item.price
+            }</td>
+            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
+                <a href="${item.url}" target="_blank">${item.url}</a>
+            </td>
+        </tr>
+    `
   );
+}
+
+async function sendCheapestPricesEmail() {
+  const totalPrice =
+    mainCheapestFlightPrices.reduce((prev, curr) => prev + curr.price, 0) +
+    adjacentCheapestFlightPrices.reduce((prev, curr) => prev + curr.price, 0);
 
   console.log(
     "Here's all the prices found for the airport rotation. Sending it to you mail right away!"
@@ -730,7 +1346,12 @@ async function sendCheapestPricesEmail() {
                       </tr>
                   </thead>
                   <tbody>
-                      ${generateFlightTableRows(cheapestFlightPrices).join("")}
+                      ${generateMainFlightTableRows(
+                        mainCheapestFlightPrices
+                      ).join("")}
+                      ${generateAdjacentFlightTableRows(
+                        adjacentCheapestFlightPrices
+                      ).join("")}
                   </tbody>
               </table>
               <p>Total price (€): ${totalPrice}</p>
