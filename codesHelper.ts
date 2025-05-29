@@ -76,7 +76,7 @@ async function obtainRotations() {
     ) {
       await page.close();
       await delay(Math.floor(Math.random() * 10000 + 10000)); // Adjust delay as needed
-      page = await openPage(browser, url, new UserAgent().toString());
+      page = await openPage(browser, url);
       await acceptCookiesAfterVerification(page);
     }
 
@@ -104,11 +104,7 @@ async function obtainRotations() {
     aircraftType: string
   ) {
     console.log(`Opening data for ${link.aircraftReg}.`);
-    let detailPage = await openPage(
-      browser,
-      link.link,
-      new UserAgent().toString()
-    );
+    let detailPage = await openPage(browser, link.link);
 
     detailPage = await waitForVerification(browser, detailPage, link.link);
 
@@ -131,7 +127,7 @@ async function obtainRotations() {
     isAircraftFrequent: boolean;
     airlineName: string;
   }> {
-    let page = await openPage(browser, url, new UserAgent().toString());
+    let page = await openPage(browser, url);
 
     page = await waitForVerification(browser, page, url);
 
@@ -325,8 +321,7 @@ async function obtainRotations() {
     try {
       const page = await openPage(
         browser,
-        `https://www.flightradar24.com/data/aircraft/${aircraftType}`,
-        new UserAgent().toString()
+        `https://www.flightradar24.com/data/aircraft/${aircraftType}`
       );
 
       console.log(`Opened page at ${page.url()}`);

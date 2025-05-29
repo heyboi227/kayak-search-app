@@ -228,7 +228,7 @@ async function lookForFlights(
         continue;
       }
 
-      let page = await openPage(browser, urlsToOpen[i].url, userAgent);
+      let page = await openPage(browser, urlsToOpen[i].url);
 
       console.log(`Opened URL at: ${urlsToOpen[i].url}.`);
 
@@ -429,11 +429,7 @@ async function lookForAdjacentFlights(
 
   try {
     for (const link of links) {
-      const page = await openPage(
-        browser,
-        link.url,
-        userAgents[Math.floor(Math.random() * userAgents.length)].toString()
-      );
+      const page = await openPage(browser, link.url);
       console.log(`Opened URL at: ${link.url}.`);
 
       await handleCaptcha(page, link.url);

@@ -10,7 +10,6 @@ async function main() {
   const page = await openPage(
     browser,
     "https://www.kayak.ie/airlines",
-    new UserAgent({ deviceCategory: "desktop" }).random().toString()
   );
 
   const pageCookies = await browser.cookies();
