@@ -54,17 +54,6 @@ export function convertTimeNotation(
   return m.tz(toZone).format("HHmm");
 }
 
-export function convertLongTimeNotation(
-  timeStr: string, // e.g. "07:00"
-  fromZone: string, // e.g. "Europe/Belgrade"
-  toZone: string // e.g. "Asia/Dubai"
-): string {
-  // parse `timeStr` in the source zone…
-  const m = moment.tz(`${timeStr}`, "HH:mm", fromZone);
-  // …then shift to the destination zone and format as “HHmm”
-  return m.tz(toZone).format("HH:mm");
-}
-
 export function extractRotationFromUrl(url: string): string {
   const m = url.match(/\/flights\/([^\/]+)\//);
   return m ? m[1] : "";
@@ -154,22 +143,23 @@ export function convertArrivalToDestZone(
   return destMoment.format("ddd HH:mm");
 }
 
+export function convertHomeMomentToLocal(
+  dateIso: string,
+  time: string,
+  homeTz: string,
+  localTz: string
+): moment.Moment {
+  return moment
+    .tz(`${dateIso} ${time}`, "YYYY-MM-DD HH:mm", homeTz)
+    .tz(localTz);
+}
+
 export function makeLocalMoment(
   dateIso: string,
   time: string,
   tz: string
 ): moment.Moment {
-  return moment(`${dateIso} ${time}`, "YYYY-MM-DD HH:mm", "Europe/Belgrade").tz(
-    tz
-  );
-}
-
-export function makeDirectLocalMoment(
-  dateIso: string,
-  time: string,
-  tz: string
-): moment.Moment {
-  return moment(`${dateIso} ${time}`, "YYYY-MM-DD HH:mm", tz);
+  return moment.tz(`${dateIso} ${time}`, "YYYY-MM-DD HH:mm", tz);
 }
 
 const ISO_DAY: Record<string, number> = {

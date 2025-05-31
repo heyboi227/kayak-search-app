@@ -4,13 +4,12 @@ import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
 import {
   containsExactMatch,
-  convertLongTimeNotation,
+  convertHomeMomentToLocal,
   convertTimeNotation,
   delay,
   extractRotationFromUrl,
   getTimezoneForAirport,
   loadData,
-  makeDirectLocalMoment,
   makeLocalMoment,
   parseDayFrag,
 } from "./helpers";
@@ -49,9 +48,9 @@ type AdjacentFlightPrice = {
 let mainFlightPrices: MainFlightPrice[] = [];
 let adjacentFlightPrices: AdjacentFlightPrice[] = [];
 
-const aircraftModel = "A350"; // aircraft model value in the Kayak string search
-const aircraftModelToOpen = "A359"; // aircraft model value JSON file suffix
-const aircraftModelStringSearch = "A350-900"; // aircraft model substring value to search in flights
+const aircraftModel = "A380"; // aircraft model value in the Kayak string search
+const aircraftModelToOpen = "A388"; // aircraft model value JSON file suffix
+const aircraftModelStringSearch = "A380"; // aircraft model substring value to search in flights
 
 const cityCodesForMultipleAirports = {
   BJS: ["PEK", "PKX"],
@@ -106,9 +105,9 @@ const cityCodesForMultipleAirports = {
 };
 
 const homeAirport: string = "BEG";
-const numOfAdults: number = 1;
+const numOfAdults: number = 5;
 
-const saturday = new Date("2025-06-14");
+const saturday = new Date("2025-09-20");
 let saturdayIso = saturday.toISOString().substring(0, 10);
 
 async function main() {
@@ -221,10 +220,11 @@ function prepareUrls(
   latestDate.setHours(12, 0, 0, 0);
   const mondayDateProp = latestDate.toISOString().slice(5, 10).replace("-", "");
 
-  for (const rotation of prepareRotations(
-    airportRotations,
-    restrictedAirportCodes
-  )) {
+  const rotations = Array.from(
+    prepareRotations(airportRotations, restrictedAirportCodes)
+  );
+
+  for (const rotation of rotations) {
     map[rotation] = [];
     let pendingTakeoff: string | null = null;
     let pendingLanding: string | null = null;
@@ -306,7 +306,7 @@ function prepareUrls(
       const fsStr = props.join(";");
       const url = `https://www.kayak.ie/flights/${rotation}/${returnDateIso}${
         numOfAdults > 1 ? `/${numOfAdults}adults` : ""
-      }?fs=stops=~0;eqmodel=~${aircraftModel};${fsStr}&sort=depart_a`;
+      }?fs=stops=~0;eqmodel=~${aircraftModel};${fsStr}&sort=price_a`;
       map[rotation].push({ url, dateIso: returnDateIso });
     }
   }
@@ -333,7 +333,8 @@ async function findAdjacentForMain(
     mainCandidate.date,
     mainCandidate.depAirport,
     mainCandidate.arrAirport,
-    mainCandidate.flightInfo.flightTime,
+    mainCandidate.flightInfo.flightTime.split(" – ")[0],
+    mainCandidate.flightInfo.flightTime.split(" – ")[1],
     browser,
     links
   );
@@ -350,7 +351,8 @@ async function findAdjacentForMain(
     mainCandidate.date,
     mainCandidate.depAirport,
     mainCandidate.arrAirport,
-    mainCandidate.flightInfo.flightTime,
+    mainCandidate.flightInfo.flightTime.split(" – ")[0],
+    mainCandidate.flightInfo.flightTime.split(" – ")[1],
     browser,
     links
   );
@@ -432,6 +434,12 @@ async function lookForFlights(
 
       await acceptCookies(page);
 
+      while (page.url().endsWith("bestflight_a")) {
+        await delay(5000);
+        await page.goto(url);
+        await delay(5000);
+      }
+
       const firstSelector = page
         .waitForSelector(".c8MCw-header-text")
         .catch(() => null);
@@ -501,8 +509,7 @@ async function lookForFlights(
           page,
           flights,
           urlsToOpen,
-          airportRotation,
-          urlsToOpen.findIndex((url) => url.url === page.url())
+          airportRotation
         );
 
         if (offers === null || offers.length === 0) {
@@ -537,7 +544,12 @@ async function lookForFlights(
 
     for (const mainCandidate of mainFlightPrices) {
       console.log(
-        `Finding adjacent flight combinations for ${mainCandidate.url}...`
+        `Finding adjacent flight combinations for ${JSON.stringify({
+          flightDate: mainCandidate.date,
+          flightRoute: mainCandidate.flightInfo.flightRoute,
+          flightTime: mainCandidate.flightInfo.flightTime,
+          flightNumber: mainCandidate.flightInfo.flightNumber,
+        })}...`
       );
       const { adjacentPrices, totalPrice } = await findAdjacentForMain(
         mainCandidate,
@@ -611,7 +623,7 @@ async function prepareAdjacentFlightLinks(
         .format("YYYY-MM-DD")
     : mainFlightDateIso;
 
-  mainFlightArrTime.replace(/\+\d+/g, "");
+  mainFlightArrTime = mainFlightArrTime.replaceAll(/\+\d+/g, "");
 
   const dates = getDates(new Date(saturdayIso));
 
@@ -681,7 +693,7 @@ async function prepareAdjacentFlightLinks(
           airportRotation.split("-")[0]
         }/${date}${
           numOfAdults > 1 ? `/${numOfAdults}adults` : ""
-        }?fs=${fs};layoverdur=90-360;baditin=baditin&sort=price_a`,
+        }?fs=${fs};layoverdur=-360;baditin=baditin&sort=price_a`,
         flightType: "depart",
         dateIso: date,
         airportRotation,
@@ -712,7 +724,7 @@ async function prepareAdjacentFlightLinks(
             airportRotation.split("-")[1]
           }-${homeAirport}/${dateIso}${
             numOfAdults > 1 ? `/${numOfAdults}adults` : ""
-          }?fs=${fs};layoverdur=90-360;baditin=baditin&sort=price_a`,
+          }?fs=${fs};layoverdur=-360;baditin=baditin&sort=price_a`,
           flightType: "return",
           dateIso,
           airportRotation,
@@ -730,7 +742,8 @@ async function lookForAdjacentDepartFlights(
   mainFlightDateIso: string,
   mainFlightDepAirport: string,
   mainFlightArrAirport: string,
-  mainFlightTime: string,
+  mainFlightDepTime: string,
+  mainFlightArrTime: string,
   browser: Browser,
   adjacentFlightLinks: {
     url: string;
@@ -753,6 +766,12 @@ async function lookForAdjacentDepartFlights(
 
       await delay(500);
       await acceptCookies(page);
+
+      while (page.url().endsWith("bestflight_a")) {
+        await delay(5000);
+        await page.goto(link.url);
+        await delay(5000);
+      }
 
       const firstSelector = page
         .waitForSelector(".c8MCw-header-text")
@@ -811,7 +830,8 @@ async function lookForAdjacentDepartFlights(
           mainFlightDepAirport,
           mainFlightArrAirport,
           link.dateIso,
-          mainFlightTime,
+          mainFlightDepTime,
+          mainFlightArrTime,
           link.flightType,
           true,
           extractRotationFromUrl(link.url),
@@ -848,7 +868,8 @@ async function lookForAdjacentReturnFlights(
   mainFlightDateIso: string,
   mainFlightDepAirport: string,
   mainFlightArrAirport: string,
-  mainFlightTime: string,
+  mainFlightDepTime: string,
+  mainFlightArrTime: string,
   browser: Browser,
   adjacentFlightLinks: {
     url: string;
@@ -871,6 +892,12 @@ async function lookForAdjacentReturnFlights(
 
       await delay(500);
       await acceptCookies(page);
+
+      while (page.url().endsWith("bestflight_a")) {
+        await delay(5000);
+        await page.goto(link.url);
+        await delay(5000);
+      }
 
       const firstSelector = page
         .waitForSelector(".c8MCw-header-text")
@@ -929,7 +956,8 @@ async function lookForAdjacentReturnFlights(
           mainFlightDepAirport,
           mainFlightArrAirport,
           link.dateIso,
-          mainFlightTime,
+          mainFlightDepTime,
+          mainFlightArrTime,
           link.flightType,
           true,
           extractRotationFromUrl(link.url),
@@ -1009,8 +1037,7 @@ async function obtainAllPricesForMainRotation(
     dateIso: string;
     airportRotation: string;
   }[],
-  airportRotation: string,
-  pageIndex: number
+  airportRotation: string
 ) {
   const airlines: Object = await loadData("airlines.json");
 
@@ -1030,23 +1057,17 @@ async function obtainAllPricesForMainRotation(
     .day(mainFlightDateIsoMoment.day() >= 2 ? 8 : 1)
     .format("YYYY-MM-DD");
 
-  const minDepartureMoment = makeLocalMoment(
+  const minDepartureMoment = convertHomeMomentToLocal(
     fridayDateIso,
-    convertLongTimeNotation(
-      "18:30",
-      getTimezoneForAirport(homeAirport),
-      getTimezoneForAirport(origAirport)
-    ),
+    "18:30",
+    getTimezoneForAirport(homeAirport),
     getTimezoneForAirport(origAirport)
   );
 
-  const maxArrivalMoment = makeLocalMoment(
+  const maxArrivalMoment = convertHomeMomentToLocal(
     mondayDateIso,
-    convertLongTimeNotation(
-      "07:30",
-      getTimezoneForAirport(homeAirport),
-      getTimezoneForAirport(origAirport)
-    ),
+    "07:30",
+    getTimezoneForAirport(homeAirport),
     getTimezoneForAirport(destAirport)
   );
 
@@ -1386,7 +1407,8 @@ async function obtainPriceForAdjacentFlight(
   mainFlightDepAirport: string,
   mainFlightArrAirport: string,
   dateIso: string,
-  mainFlightTime: string,
+  mainFlightDepTime: string,
+  mainFlightArrTime: string,
   flightType: "depart" | "return",
   firstSearch: boolean,
   airportRotation: string,
@@ -1399,19 +1421,31 @@ async function obtainPriceForAdjacentFlight(
   startIndex: number = 0,
   buttonsStartIndex: number = 0
 ) {
+  let daysLater: string = "";
+
+  if (/\+\d+/g.test(mainFlightArrTime)) {
+    daysLater = mainFlightArrTime.substring(mainFlightArrTime.length - 1);
+    mainFlightArrTime = mainFlightArrTime.replaceAll(/\+\d+/g, "");
+  }
+
+  const mainFlightDepMoment = makeLocalMoment(
+    mainFlightDateIso,
+    mainFlightDepTime,
+    getTimezoneForAirport(mainFlightDepAirport)
+  );
+
+  const mainFlightArrMoment = makeLocalMoment(
+    daysLater
+      ? moment(mainFlightDateIso)
+          .add(daysLater, parseInt(daysLater) === 1 ? "day" : "days")
+          .format("YYYY-MM-DD")
+      : mainFlightDateIso,
+    mainFlightArrTime,
+    getTimezoneForAirport(mainFlightArrAirport)
+  );
+
   if (firstSearch) {
-    const [mainFlightDepTime, mainFlightArrTime] = mainFlightTime.split(" – ");
     const [origAirport, destAirport] = airportRotation.split("-");
-
-    let daysLater: string = "";
-
-    if (
-      mainFlightArrTime.endsWith("+1") ||
-      mainFlightArrTime.endsWith("+2") ||
-      mainFlightArrTime.endsWith("+3")
-    ) {
-      daysLater = mainFlightArrTime.substring(mainFlightArrTime.length - 1);
-    }
 
     const dateIsoMoment = moment(dateIso);
 
@@ -1423,32 +1457,16 @@ async function obtainPriceForAdjacentFlight(
       .day(dateIsoMoment.day() >= 2 ? 8 : 1)
       .format("YYYY-MM-DD");
 
-    const minDepartureMoment = makeLocalMoment(
+    const minHomeDepMoment = makeLocalMoment(
       fridayDateIso,
       "18:30",
-      getTimezoneForAirport(origAirport)
+      getTimezoneForAirport(homeAirport)
     );
 
-    const maxArrivalMoment = makeLocalMoment(
+    const maxHomeArrMoment = makeLocalMoment(
       mondayDateIso,
       "07:30",
-      getTimezoneForAirport(destAirport)
-    );
-
-    const maxConnectArrivalMoment = makeDirectLocalMoment(
-      mainFlightDateIso,
-      mainFlightDepTime,
-      getTimezoneForAirport(mainFlightDepAirport)
-    );
-
-    const minConnectDepartureMoment = makeDirectLocalMoment(
-      daysLater
-        ? moment(mainFlightDateIso)
-            .add(daysLater, parseInt(daysLater) === 1 ? "day" : "days")
-            .format("YYYY-MM-DD")
-        : mainFlightDateIso,
-      mainFlightArrTime,
-      getTimezoneForAirport(mainFlightArrAirport)
+      getTimezoneForAirport(homeAirport)
     );
 
     const takeoffTimeElement = (
@@ -1507,16 +1525,16 @@ async function obtainPriceForAdjacentFlight(
       );
 
       const nonSuitableDepartDates =
-        firstDepMoment.isBefore(minDepartureMoment) ||
-        lastDepMoment.isBefore(minDepartureMoment) ||
-        firstArrMoment.isAfter(maxConnectArrivalMoment) ||
-        lastArrMoment.isAfter(maxConnectArrivalMoment);
+        firstDepMoment.isBefore(minHomeDepMoment) ||
+        lastDepMoment.isBefore(minHomeDepMoment) ||
+        firstArrMoment.isAfter(mainFlightDepMoment) ||
+        lastArrMoment.isAfter(mainFlightDepMoment);
 
       const nonSuitableReturnDates =
-        firstArrMoment.isAfter(maxArrivalMoment) ||
-        lastArrMoment.isAfter(maxArrivalMoment) ||
-        firstDepMoment.isBefore(minConnectDepartureMoment) ||
-        lastDepMoment.isBefore(minConnectDepartureMoment);
+        firstArrMoment.isAfter(maxHomeArrMoment) ||
+        lastArrMoment.isAfter(maxHomeArrMoment) ||
+        firstDepMoment.isBefore(mainFlightArrMoment) ||
+        lastDepMoment.isBefore(mainFlightArrMoment);
 
       if (
         (flightType === "depart" && nonSuitableDepartDates) ||
@@ -1558,7 +1576,8 @@ async function obtainPriceForAdjacentFlight(
         mainFlightDateIso,
         mainFlightDepAirport,
         mainFlightArrAirport,
-        mainFlightTime,
+        mainFlightDepTime,
+        mainFlightArrTime,
         browser,
         adjacentFlightLinks
       );
@@ -1567,7 +1586,8 @@ async function obtainPriceForAdjacentFlight(
         mainFlightDateIso,
         mainFlightDepAirport,
         mainFlightArrAirport,
-        mainFlightTime,
+        mainFlightDepTime,
+        mainFlightArrTime,
         browser,
         adjacentFlightLinks
       );
@@ -1736,28 +1756,16 @@ async function obtainPriceForAdjacentFlight(
         .substring(8, 13);
 
       if (flightInfo.flightType === "depart") {
-        const [mainFlightDepartHours, mainFlightDepartMinutes] = mainFlightTime
-          .substring(0, 5)
-          .split(":")
-          .map(Number);
-
-        const mainDep = moment(
-          `${mainFlightDateIso} ${mainFlightDepartHours}:${mainFlightDepartMinutes}`,
-          "YYYY-MM-DD HH:mm"
-        );
-
-        const [adjacentFlightArrivalHours, adjacentFlightArrivalMinutes] =
-          lastLegFlightSegmentArrivalTime.split(":").map(Number);
-
-        const adjArr = moment(
-          `${adjacentFlightDateIso} ${adjacentFlightArrivalHours}:${adjacentFlightArrivalMinutes}`,
-          "YYYY-MM-DD HH:mm"
+        const adjArr = makeLocalMoment(
+          adjacentFlightDateIso,
+          lastLegFlightSegmentArrivalTime,
+          getTimezoneForAirport(mainFlightDepAirport)
         );
 
         const minMs =
-          (connectAirport === mainFlightDepAirport ? 1.5 : 5) * 60 * 60 * 1000;
+          (connectAirport === mainFlightDepAirport ? 2 : 5) * 60 * 60 * 1000;
 
-        marginMs = mainDep.diff(adjArr);
+        marginMs = mainFlightDepMoment.diff(adjArr);
 
         if (marginMs < minMs) {
           flightInfoArr.length = 0;
@@ -1765,23 +1773,6 @@ async function obtainPriceForAdjacentFlight(
           continue;
         }
 
-        const mainFlightDepartureTimeDate = new Date(mainFlightDateIso);
-        const adjacentFlightArrivalTimeDate = new Date(adjacentFlightDateIso);
-
-        mainFlightDepartureTimeDate.setHours(
-          mainFlightDepartHours,
-          mainFlightDepartMinutes
-        );
-        adjacentFlightArrivalTimeDate.setHours(
-          adjacentFlightArrivalHours,
-          adjacentFlightArrivalMinutes
-        );
-
-        if (adjacentFlightArrivalTimeDate > mainFlightDepartureTimeDate) {
-          flightInfoArr.length = 0;
-          await page.goBack();
-          continue;
-        }
         const priceDisplay = await page.$(".jnTP-display-price");
 
         if (priceDisplay !== null && priceDisplay !== undefined) {
@@ -1789,48 +1780,18 @@ async function obtainPriceForAdjacentFlight(
           break;
         }
       } else {
-        const [mainFlightReturnHours, mainFlightReturnMinutes] = mainFlightTime
-          .substring(8, 13)
-          .split(":")
-          .map(Number);
-
-        const mainRet = moment(
-          `${mainFlightDateIso} ${mainFlightReturnHours}:${mainFlightReturnMinutes}`,
-          "YYYY-MM-DD HH:mm"
-        );
-
-        const [adjacentFlightDepartureHours, adjacentFlightDepartureMinutes] =
-          firstLegFlightSegmentDepartureTime.split(":").map(Number);
-
-        const adjDep = moment(
-          `${adjacentFlightDateIso} ${adjacentFlightDepartureHours}:${adjacentFlightDepartureMinutes}`,
-          "YYYY-MM-DD HH:mm"
+        const adjDep = makeLocalMoment(
+          adjacentFlightDateIso,
+          firstLegFlightSegmentDepartureTime,
+          getTimezoneForAirport(mainFlightArrAirport)
         );
 
         const minMs =
-          (connectAirport === mainFlightArrAirport ? 1.5 : 5) * 60 * 60 * 1000;
+          (connectAirport === mainFlightArrAirport ? 2 : 5) * 60 * 60 * 1000;
 
-        marginMs = adjDep.diff(mainRet);
+        marginMs = adjDep.diff(mainFlightArrMoment);
 
         if (marginMs < minMs) {
-          flightInfoArr.length = 0;
-          await page.goBack();
-          continue;
-        }
-
-        const mainFlightReturnTimeDate = new Date(mainFlightDateIso);
-        const adjacentFlightDepartureTimeDate = new Date(adjacentFlightDateIso);
-
-        mainFlightReturnTimeDate.setHours(
-          mainFlightReturnHours,
-          mainFlightReturnMinutes
-        );
-        adjacentFlightDepartureTimeDate.setHours(
-          adjacentFlightDepartureHours,
-          adjacentFlightDepartureMinutes
-        );
-
-        if (adjacentFlightDepartureTimeDate < mainFlightReturnTimeDate) {
           flightInfoArr.length = 0;
           await page.goBack();
           continue;
@@ -1858,7 +1819,7 @@ async function obtainPriceForAdjacentFlight(
     return {
       flightPrice,
       adjacentFlightBaseDateIso,
-      mainFlightTime,
+      mainFlightTime: mainFlightDepTime,
       flightInfoArr,
       marginMs,
       flightType,
@@ -1887,7 +1848,8 @@ async function obtainPriceForAdjacentFlight(
         mainFlightDepAirport,
         mainFlightArrAirport,
         dateIso,
-        mainFlightTime,
+        mainFlightDepTime,
+        mainFlightArrTime,
         flightType,
         false,
         airportRotation,
