@@ -4,10 +4,10 @@ import { MailConfigurationParameters } from "./config.mail";
 import { launchBrowser, openPage } from "./prepareBrowser";
 import {
   containsExactMatch,
-  convertHomeMomentToLocal,
   convertTimeNotation,
   delay,
   extractRotationFromUrl,
+  findEarliestZone,
   getTimezoneForAirport,
   loadData,
   makeLocalMoment,
@@ -43,6 +43,7 @@ type AdjacentFlightPrice = {
   }[];
   flightType: "depart" | "return";
   connectAirport: string;
+  homeAirport: string;
 };
 
 let mainFlightPrices: MainFlightPrice[] = [];
@@ -104,8 +105,10 @@ const cityCodesForMultipleAirports = {
   THR: ["IKA", "THR"],
 };
 
-const homeAirport: string = "BEG";
-const numOfAdults: number = 5;
+const homeDepartParams: { homeAirport: string; numOfAdults: number }[] = [
+  { homeAirport: "BEG", numOfAdults: 5 },
+  { homeAirport: "ABZ", numOfAdults: 1 },
+];
 
 const saturday = new Date("2025-09-20");
 let saturdayIso = saturday.toISOString().substring(0, 10);
@@ -133,12 +136,11 @@ async function main() {
         mainFlightPrices = [];
         adjacentFlightPrices = [];
 
-        console.log(`Processing rotation ${rotation}...`);
+        console.log(`Processing rotation ${rotation}...\n`);
 
         await lookForFlights(
           urls.map((url) => ({
             ...url,
-            flightType: "depart",
             airportRotation: rotation,
           })),
           flights,
@@ -193,7 +195,6 @@ function prepareRotations(
   return airportRotationsSet;
 }
 
-// Generate dates Friday to Monday
 function getDates(baseDate: Date): string[] {
   const dates: string[] = [];
 
@@ -209,11 +210,10 @@ function getDates(baseDate: Date): string[] {
 function prepareUrls(
   airportRotations: string[],
   restrictedAirportCodes: string[]
-): Record<string, { url: string; dateIso: string }[]> {
-  const map: Record<string, { url: string; dateIso: string }[]> = {};
+): Record<string, { url: string }[]> {
+  const map: Record<string, { url: string }[]> = {};
   const dates = getDates(new Date(saturdayIso));
 
-  // pre-calc mondayDateProp for default landing
   const dateObjects = dates.map((d) => new Date(d).getTime());
   const latestTimestamp = Math.max(...dateObjects);
   const latestDate = new Date(latestTimestamp);
@@ -222,6 +222,17 @@ function prepareUrls(
 
   const rotations = Array.from(
     prepareRotations(airportRotations, restrictedAirportCodes)
+  );
+
+  const earliestTimeZone = findEarliestZone(
+    homeDepartParams.map((homeDepartParam) =>
+      getTimezoneForAirport(homeDepartParam.homeAirport)
+    )
+  );
+
+  const totalNumOfAdults = homeDepartParams.reduce(
+    (prev, curr) => prev + curr.numOfAdults,
+    0
   );
 
   for (const rotation of rotations) {
@@ -235,31 +246,31 @@ function prepareUrls(
         weekday: "long",
       }).format(new Date(date));
 
-      // Compute props
       const takeoffProp =
         weekday === "Friday"
           ? `takeoff=${convertTimeNotation(
               "1830",
-              getTimezoneForAirport(homeAirport),
+              earliestTimeZone,
               getTimezoneForAirport(departAirport)
             )},`
           : null;
+
       const landingTime = convertTimeNotation(
         "0730",
-        getTimezoneForAirport(homeAirport),
+        earliestTimeZone,
         getTimezoneForAirport(arriveAirport)
       );
+
       const landingProp =
         weekday === "Monday"
           ? `landing=,${landingTime}`
           : `landing=,${mondayDateProp}@${landingTime}`;
 
-      // Friday filter (depart)
       if (weekday === "Friday") {
         const homeFri = moment.tz(
           `${date} 18:30`,
           "YYYY-MM-DD HH:mm",
-          getTimezoneForAirport(homeAirport)
+          earliestTimeZone
         );
         const localFri = homeFri
           .clone()
@@ -270,13 +281,11 @@ function prepareUrls(
         }
       }
 
-      // Monday filter (return)
-      let returnDateIso = date;
       if (weekday === "Monday") {
         const homeMon = moment.tz(
           `${date} 07:30`,
           "YYYY-MM-DD HH:mm",
-          getTimezoneForAirport(homeAirport)
+          earliestTimeZone
         );
         const localMon = homeMon
           .clone()
@@ -286,28 +295,30 @@ function prepareUrls(
           pendingLanding = landingProp;
           continue;
         }
-        returnDateIso = localDateMon;
       }
 
-      // Assemble fs props
       const props: string[] = [];
+
       if (takeoffProp && weekday === "Friday") props.push(takeoffProp);
+
       if (pendingTakeoff) {
         props.push(pendingTakeoff);
         pendingTakeoff = null;
       }
+
       props.push(landingProp);
+
       if (pendingLanding) {
         props.push(pendingLanding);
         pendingLanding = null;
       }
 
-      // Build URL
       const fsStr = props.join(";");
-      const url = `https://www.kayak.ie/flights/${rotation}/${returnDateIso}${
-        numOfAdults > 1 ? `/${numOfAdults}adults` : ""
-      }?fs=stops=~0;eqmodel=~${aircraftModel};${fsStr}&sort=price_a`;
-      map[rotation].push({ url, dateIso: returnDateIso });
+
+      const url = `https://www.kayak.ie/flights/${rotation}/${date}${
+        totalNumOfAdults > 1 ? `/${totalNumOfAdults}adults` : ""
+      }?fs=${fsStr};stops=~0;eqmodel=~${aircraftModel}&sort=price_a`;
+      map[rotation].push({ url });
     }
   }
 
@@ -316,17 +327,16 @@ function prepareUrls(
 
 async function findAdjacentForMain(
   mainCandidate: MainFlightPrice,
-  browser: Browser
-): Promise<{
-  adjacentPrices: AdjacentFlightPrice[];
-  totalPrice: number;
-}> {
-  adjacentFlightPrices.length = 0;
-
+  browser: Browser,
+  homeAirport: string,
+  numOfAdults: number
+) {
   const links = await prepareAdjacentFlightLinks(
     extractRotationFromUrl(mainCandidate.url),
     mainCandidate.date,
-    mainCandidate.flightInfo.flightTime
+    mainCandidate.flightInfo.flightTime,
+    homeAirport,
+    numOfAdults
   );
 
   await lookForAdjacentDepartFlights(
@@ -336,15 +346,19 @@ async function findAdjacentForMain(
     mainCandidate.flightInfo.flightTime.split(" – ")[0],
     mainCandidate.flightInfo.flightTime.split(" – ")[1],
     browser,
-    links
+    links,
+    homeAirport
   );
 
-  if (adjacentFlightPrices.length === 0) {
-    console.log("No suitable depart combination has been found. Exiting.");
-    return {
-      adjacentPrices: [],
-      totalPrice: -Infinity,
-    };
+  if (
+    adjacentFlightPrices.filter(
+      (adjacentFlightPrice) =>
+        adjacentFlightPrice.homeAirport === homeAirport &&
+        adjacentFlightPrice.flightType === "depart"
+    ).length === 0
+  ) {
+    console.log("No suitable depart combination has been found. Exiting.\n");
+    return;
   }
 
   await lookForAdjacentReturnFlights(
@@ -354,55 +368,14 @@ async function findAdjacentForMain(
     mainCandidate.flightInfo.flightTime.split(" – ")[0],
     mainCandidate.flightInfo.flightTime.split(" – ")[1],
     browser,
-    links
+    links,
+    homeAirport
   );
-
-  const departLegs = adjacentFlightPrices.filter(
-    (p) => p.flightType === "depart"
-  );
-  const returnLegs = adjacentFlightPrices.filter(
-    (p) => p.flightType === "return"
-  );
-
-  if (departLegs.length === 0 || returnLegs.length === 0) {
-    return {
-      adjacentPrices: [],
-      totalPrice: -Infinity,
-    };
-  }
-
-  const pickCheapest = (arr: AdjacentFlightPrice[]) => {
-    const cheapestPrice = Math.min(...arr.map((el) => el.price));
-
-    return arr.find((el) => el.price === cheapestPrice);
-  };
-
-  const cheapestDepart = pickCheapest(departLegs);
-  const cheapestReturn = pickCheapest(returnLegs);
-
-  console.log(
-    `Picked the cheapest depart flight:\n${JSON.stringify(cheapestDepart)}`
-  );
-
-  console.log(
-    `\nPicked the cheapest return flight:\n${JSON.stringify(cheapestReturn)}\n`
-  );
-
-  const final = [cheapestDepart, cheapestReturn];
-  const totalPrice =
-    final.reduce((prev, curr) => prev + curr.price, 0) + mainCandidate.price;
-
-  return {
-    adjacentPrices: final,
-    totalPrice,
-  };
 }
 
 async function lookForFlights(
   urlsToOpen: {
     url: string;
-    flightType: "depart" | "return";
-    dateIso: string;
     airportRotation: string;
   }[],
   flights: { airlineName: string; flightNumber: string }[],
@@ -414,7 +387,7 @@ async function lookForFlights(
       const { url } = urlsToOpen[i];
       let page = await openPage(browser, url);
 
-      console.log(`Opened URL at: ${url}.`);
+      console.log(`Opened URL at: ${url}.\n`);
 
       await page.bringToFront();
 
@@ -467,9 +440,9 @@ async function lookForFlights(
           titleText
         ) {
           if (i !== urlsToOpen.slice(startIndex).length - 1) {
-            console.log("No prices available. Proceeding to the next link.");
+            console.log("No prices available. Proceeding to the next link.\n");
           } else {
-            console.log("No prices available.");
+            console.log("No prices available.\n");
           }
           await delay(5000);
           await page.close();
@@ -502,7 +475,7 @@ async function lookForFlights(
 
         await page.bringToFront();
 
-        console.log(`Checking out ${page.url()}.`);
+        console.log(`Checking out ${page.url()}.\n`);
         const offers = await obtainAllPricesForMainRotation(
           browser,
           page,
@@ -513,13 +486,13 @@ async function lookForFlights(
 
         if (offers === null || offers.length === 0) {
           console.log(
-            "Cannot find any offers for this main flight link. Skipping..."
+            "Cannot find any offers for this main flight link. Skipping...\n"
           );
 
           await page.close();
           continue;
         } else {
-          console.log("Added all the offers for this main flight link.");
+          console.log("Added all the offers for this main flight link.\n");
 
           mainFlightPrices.push(...offers);
           await page.close();
@@ -529,11 +502,11 @@ async function lookForFlights(
 
     if (mainFlightPrices.length > 0) {
       console.log(
-        "Added all the offers for all main flight links. Proceeding to look for adjacent flight combinations..."
+        "Added all the offers for all main flight links. Proceeding to look for adjacent flight combinations...\n"
       );
     } else {
       console.log(
-        "No valid main flight price offers found for any of the links. Moving to the next rotation..."
+        "No valid main flight price offers found for any of the links. Moving to the next rotation...\n"
       );
       return;
     }
@@ -542,65 +515,172 @@ async function lookForFlights(
 
     let winner: {
       main: MainFlightPrice;
-      adjacent: AdjacentFlightPrice[];
+      adjacent: {
+        homeAirport: string;
+        adjacentPrices: AdjacentFlightPrice[];
+      }[];
       totalPrice: number;
     } | null = null;
 
     for (const mainCandidate of mainFlightPrices) {
-      console.log(
-        `Finding adjacent flight combinations for ${JSON.stringify({
-          flightDate: mainCandidate.date,
-          flightRoute: mainCandidate.flightInfo.flightRoute,
-          flightTime: mainCandidate.flightInfo.flightTime,
-          flightNumber: mainCandidate.flightInfo.flightNumber,
-        })}...`
-      );
-      const { adjacentPrices, totalPrice } = await findAdjacentForMain(
-        mainCandidate,
-        browser
-      );
+      let noDepartFlightsFound: boolean = false;
+      let numOfAdults: number = 0;
 
-      if (adjacentPrices.length === 0) {
+      adjacentFlightPrices.length = 0;
+
+      for (const homeDepartParam of homeDepartParams) {
+        numOfAdults = homeDepartParam.numOfAdults;
+
         console.log(
-          "Wasn't able to find any complete roundtrip (depart + return) adjacent flight options. Skipping this main flight offer."
+          `Finding adjacent ${
+            homeDepartParam.homeAirport
+          } flight combinations for ${JSON.stringify({
+            flightDate: mainCandidate.date,
+            flightRoute: mainCandidate.flightInfo.flightRoute,
+            flightTime: mainCandidate.flightInfo.flightTime,
+            flightNumber: mainCandidate.flightInfo.flightNumber,
+          })}...\n`
         );
-      } else if (!winner || totalPrice < winner.totalPrice) {
+
+        await findAdjacentForMain(
+          mainCandidate,
+          browser,
+          homeDepartParam.homeAirport,
+          homeDepartParam.numOfAdults
+        );
+
+        let filteredHomeAirportDepartPrices: AdjacentFlightPrice[] = [];
+
+        const filteredHomeAirportPrices = adjacentFlightPrices.filter(
+          (adjacentFlightPrice) =>
+            adjacentFlightPrice.homeAirport === homeDepartParam.homeAirport
+        );
+
+        if (filteredHomeAirportPrices.length === 0) {
+          noDepartFlightsFound = true;
+          break;
+        } else {
+          filteredHomeAirportDepartPrices = filteredHomeAirportPrices.filter(
+            (adjacentFlightPrice) => adjacentFlightPrice.flightType === "depart"
+          );
+
+          if (filteredHomeAirportDepartPrices.length === 0) {
+            noDepartFlightsFound = true;
+            break;
+          }
+        }
+      }
+
+      if (noDepartFlightsFound) {
+        console.log(
+          "Wasn't able to find any complete roundtrip (depart + return) adjacent flight options for one of the departure home airports. Skipping this main flight offer.\n"
+        );
+        continue;
+      }
+
+      let totalPrice: number = mainCandidate.price * numOfAdults;
+      let adjacentFlights: {
+        homeAirport: string;
+        adjacentPrices: AdjacentFlightPrice[];
+      }[] = [];
+
+      for (const homeDepartParam of homeDepartParams) {
+        const filteredHomeAirportPrices = adjacentFlightPrices.filter(
+          (adjacentFlightPrice) =>
+            adjacentFlightPrice.homeAirport === homeDepartParam.homeAirport
+        );
+
+        if (filteredHomeAirportPrices.length > 0) {
+          const pickCheapest = (arr: AdjacentFlightPrice[]) => {
+            const cheapestPrice = Math.min(...arr.map((el) => el.price));
+
+            return arr.find((el) => el.price === cheapestPrice);
+          };
+
+          const departLegs = filteredHomeAirportPrices.filter(
+            (p) => p.flightType === "depart"
+          );
+          const returnLegs = filteredHomeAirportPrices.filter(
+            (p) => p.flightType === "return"
+          );
+
+          const cheapestDepart = pickCheapest(departLegs);
+          const cheapestReturn = pickCheapest(returnLegs);
+
+          console.log(
+            `Picked the cheapest depart flight for ${
+              homeDepartParam.homeAirport
+            }:\n${JSON.stringify(cheapestDepart)}\n`
+          );
+
+          console.log(
+            `Picked the cheapest return flight for ${
+              homeDepartParam.homeAirport
+            }:\n${JSON.stringify(cheapestReturn)}\n`
+          );
+
+          adjacentFlights.push({
+            homeAirport: homeDepartParam.homeAirport,
+            adjacentPrices: [
+              {
+                ...cheapestDepart,
+                price: cheapestDepart.price * homeDepartParam.numOfAdults,
+              },
+              {
+                ...cheapestReturn,
+                price: cheapestReturn.price * homeDepartParam.numOfAdults,
+              },
+            ],
+          });
+
+          totalPrice +=
+            (cheapestDepart.price + cheapestReturn.price) *
+            homeDepartParam.numOfAdults;
+        }
+      }
+
+      if (!winner || totalPrice < winner.totalPrice) {
         winner = {
-          main: mainCandidate,
-          adjacent: adjacentPrices,
-          totalPrice,
+          main: {
+            ...mainCandidate,
+            price:
+              mainCandidate.price *
+              homeDepartParams.reduce(
+                (prev, curr) => prev + curr.numOfAdults,
+                0
+              ),
+          },
+          adjacent: adjacentFlights,
+          totalPrice: totalPrice,
         };
       }
-    }
 
-    if (winner) {
-      // now you have the optimal combination:
-      console.log(
-        `Picked rotation ${extractRotationFromUrl(winner.main.url)} @ ${
-          winner.main.date
-        } ` +
-          `with the total price of ${winner.totalPrice}€ (adjacent included).`
-      );
-      // send email or otherwise report `winner.main` + `winner.adjacent`
-      await sendCheapestPriceCombinationEmail(
-        winner.main,
-        winner.adjacent,
-        winner.totalPrice
-      );
-    } else {
-      console.log(
-        "No valid adjacent combination found for any tied main price."
-      );
+      if (winner) {
+        console.log(
+          `Picked rotation ${extractRotationFromUrl(winner.main.url)} @ ${
+            winner.main.date
+          } ` +
+            `with the total price of ${winner.totalPrice}€ (adjacent included).\n`
+        );
+
+        await sendCheapestPriceCombinationEmail(
+          winner.main,
+          winner.adjacent,
+          winner.totalPrice
+        );
+      }
     }
   } catch (error) {
-    console.log("An error occured.", error);
+    console.log("\nAn error occured.", error);
   }
 }
 
 async function prepareAdjacentFlightLinks(
   airportRotation: string,
   mainFlightDateIso: string,
-  mainFlightTime: string
+  mainFlightTime: string,
+  homeAirport: string,
+  numOfAdults: number
 ) {
   const links: {
     url: string;
@@ -754,14 +834,15 @@ async function lookForAdjacentDepartFlights(
     flightType: "depart" | "return";
     dateIso: string;
     airportRotation: string;
-  }[]
+  }[],
+  homeAirport: string
 ) {
   try {
     const links = adjacentFlightLinks.filter((l) => l.flightType === "depart");
 
     for (const link of links) {
       let page = await openPage(browser, link.url);
-      console.log(`Opened URL at: ${link.url}.`);
+      console.log(`Opened URL at: ${link.url}.\n`);
 
       await handleCaptcha(page, link.url);
 
@@ -804,9 +885,9 @@ async function lookForAdjacentDepartFlights(
           titleText
         ) {
           if (indexOf(links, link) !== links.length - 1) {
-            console.log("No prices available. Proceeding to the next link.");
+            console.log("No prices available. Proceeding to the next link.\n");
           } else {
-            console.log("No prices available.");
+            console.log("No prices available.\n");
           }
           await delay(5000);
           await page.close();
@@ -840,7 +921,8 @@ async function lookForAdjacentDepartFlights(
           link.flightType,
           true,
           extractRotationFromUrl(link.url),
-          links
+          links,
+          homeAirport
         );
 
         if (flightPrice !== null && flightPrice !== undefined) {
@@ -850,11 +932,12 @@ async function lookForAdjacentDepartFlights(
             link.url,
             flightPrice.flightInfoArr,
             flightPrice.flightType,
-            flightPrice.connectAirport
+            flightPrice.connectAirport,
+            flightPrice.homeAirport
           );
           adjacentFlightPrices.push(priceObj);
           console.log(
-            `\nAdded the adjacent flight combination's price: ${JSON.stringify(
+            `Added the adjacent flight combination's price: ${JSON.stringify(
               priceObj
             )}\n`
           );
@@ -865,7 +948,7 @@ async function lookForAdjacentDepartFlights(
     }
     await delay(Math.floor(Math.random() * 5000 + 5000));
   } catch (error) {
-    console.log("An error occured.", error);
+    console.log("\nAn error occured.", error);
   }
 }
 
@@ -881,14 +964,15 @@ async function lookForAdjacentReturnFlights(
     flightType: "depart" | "return";
     dateIso: string;
     airportRotation: string;
-  }[]
+  }[],
+  homeAirport: string
 ) {
   try {
     const links = adjacentFlightLinks.filter((l) => l.flightType === "return");
 
     for (const link of links) {
       let page = await openPage(browser, link.url);
-      console.log(`Opened URL at: ${link.url}.`);
+      console.log(`Opened URL at: ${link.url}.\n`);
 
       await handleCaptcha(page, link.url);
 
@@ -931,9 +1015,9 @@ async function lookForAdjacentReturnFlights(
           titleText
         ) {
           if (indexOf(links, link) !== links.length - 1) {
-            console.log("No prices available. Proceeding to the next link.");
+            console.log("No prices available. Proceeding to the next link.\n");
           } else {
-            console.log("No prices available.");
+            console.log("No prices available.\n");
           }
           await delay(5000);
           await page.close();
@@ -967,7 +1051,8 @@ async function lookForAdjacentReturnFlights(
           link.flightType,
           true,
           extractRotationFromUrl(link.url),
-          links
+          links,
+          homeAirport
         );
 
         if (flightPrice !== null && flightPrice !== undefined) {
@@ -977,11 +1062,12 @@ async function lookForAdjacentReturnFlights(
             link.url,
             flightPrice.flightInfoArr,
             flightPrice.flightType,
-            flightPrice.connectAirport
+            flightPrice.connectAirport,
+            flightPrice.homeAirport
           );
           adjacentFlightPrices.push(priceObj);
           console.log(
-            `\nAdded the adjacent flight combination's price: ${JSON.stringify(
+            `Added the adjacent flight combination's price: ${JSON.stringify(
               priceObj
             )}\n`
           );
@@ -992,7 +1078,7 @@ async function lookForAdjacentReturnFlights(
     }
     await delay(Math.floor(Math.random() * 5000 + 5000));
   } catch (error) {
-    console.log("An error occured.", error);
+    console.log("\nAn error occured.", error);
   }
 }
 
@@ -1002,7 +1088,7 @@ async function notifyCaptchaNeeded() {
     "CAPTCHA solving needed",
     "This might not be your lucky day. You will need to solve the CAPTCHA to proceed."
   );
-  console.log("Oops, there seems to be a CAPTCHA here. Try to solve it.");
+  console.log("\nOops, there seems to be a CAPTCHA here. Try to solve it.\n");
 }
 
 async function waitForCaptchaSolution(page: Page) {
@@ -1039,8 +1125,6 @@ async function obtainAllPricesForMainRotation(
   flights: { airlineName: string; flightNumber: string }[],
   urlsToOpen: {
     url: string;
-    flightType: "depart" | "return";
-    dateIso: string;
     airportRotation: string;
   }[],
   airportRotation: string
@@ -1048,108 +1132,6 @@ async function obtainAllPricesForMainRotation(
   const airlines: Object = await loadData("airlines.json");
 
   const offers: MainFlightPrice[] = [];
-
-  const urlObj = new URL(page.url());
-  const mainFlightDateIso = urlObj.pathname.split("/")[3];
-  const [origAirport, destAirport] = airportRotation.split("-");
-
-  const mainFlightDateIsoMoment = moment(mainFlightDateIso);
-
-  const fridayDateIso = mainFlightDateIsoMoment
-    .day(mainFlightDateIsoMoment.day() >= 5 ? 5 : -2)
-    .format("YYYY-MM-DD");
-
-  const mondayDateIso = mainFlightDateIsoMoment
-    .day(mainFlightDateIsoMoment.day() >= 2 ? 8 : 1)
-    .format("YYYY-MM-DD");
-
-  const minDepartureMoment = convertHomeMomentToLocal(
-    fridayDateIso,
-    "18:30",
-    getTimezoneForAirport(homeAirport),
-    getTimezoneForAirport(origAirport)
-  );
-
-  const maxArrivalMoment = convertHomeMomentToLocal(
-    mondayDateIso,
-    "07:30",
-    getTimezoneForAirport(homeAirport),
-    getTimezoneForAirport(destAirport)
-  );
-
-  const takeoffTimeElement = (
-    await page.$$(".oKiy-mod-visible .iKtq-inner > div:nth-child(2)")
-  )[0];
-
-  const landingTimeElement = (
-    await page.$$(".oKiy-mod-visible .iKtq-inner > div:nth-child(2)")
-  )[1];
-
-  let firstDepMoment: moment.Moment;
-  let lastDepMoment: moment.Moment;
-
-  let firstArrMoment: moment.Moment;
-  let lastArrMoment: moment.Moment;
-
-  if (takeoffTimeElement) {
-    const raw = (
-      await takeoffTimeElement.evaluate((n) => n.textContent)
-    ).trim();
-
-    const firstTime = raw.substring(0, 9);
-    const lastTime = raw.substring(12);
-
-    firstDepMoment = parseDayFrag(
-      firstTime,
-      mainFlightDateIso,
-      getTimezoneForAirport(origAirport)
-    );
-
-    lastDepMoment = parseDayFrag(
-      lastTime,
-      mainFlightDateIso,
-      getTimezoneForAirport(origAirport),
-      firstDepMoment
-    );
-
-    if (
-      firstDepMoment.isBefore(minDepartureMoment) ||
-      lastDepMoment.isBefore(minDepartureMoment)
-    ) {
-      console.log("No suitable flight offers found.");
-      return null;
-    }
-  }
-
-  if (landingTimeElement) {
-    const raw = (
-      await landingTimeElement.evaluate((n) => n.textContent)
-    ).trim();
-
-    const firstTime = raw.substring(0, 9);
-    const lastTime = raw.substring(12);
-
-    firstArrMoment = parseDayFrag(
-      firstTime,
-      mainFlightDateIso,
-      getTimezoneForAirport(destAirport)
-    );
-
-    lastArrMoment = parseDayFrag(
-      lastTime,
-      mainFlightDateIso,
-      getTimezoneForAirport(destAirport),
-      firstArrMoment
-    );
-
-    if (
-      firstArrMoment.isAfter(maxArrivalMoment) ||
-      lastArrMoment.isAfter(maxArrivalMoment)
-    ) {
-      console.log("No suitable flight offers found.");
-      return null;
-    }
-  }
 
   let foundPricesButtons: ElementHandle<HTMLAnchorElement>[] = [];
 
@@ -1345,7 +1327,7 @@ async function obtainAllPricesForMainRotation(
         );
 
         console.log(
-          `\nAdded a price for this rotation: ${JSON.stringify(
+          `Added a price for this rotation: ${JSON.stringify(
             createMainPriceObject(
               mainFlightBaseDateIso,
               rawPrice,
@@ -1389,12 +1371,12 @@ async function obtainAllPricesForMainRotation(
           await addPrice();
         } else {
           console.log(
-            "Same times... Probably a codeshare offer. Skipping this."
+            "Same times... Probably a codeshare offer. Skipping this.\n"
           );
         }
       }
     } catch (error) {
-      console.log("An error occured.", error);
+      console.log("\nAn error occured.", error);
     }
 
     await page.goBack();
@@ -1424,6 +1406,7 @@ async function obtainPriceForAdjacentFlight(
     dateIso: string;
     airportRotation: string;
   }[],
+  homeAirport: string,
   startIndex: number = 0,
   buttonsStartIndex: number = 0
 ) {
@@ -1546,7 +1529,7 @@ async function obtainPriceForAdjacentFlight(
         (flightType === "depart" && nonSuitableDepartDates) ||
         (flightType === "return" && nonSuitableReturnDates)
       ) {
-        console.log("No suitable flight offers found.");
+        console.log("No suitable flight offers found.\n");
         return null;
       }
     }
@@ -1585,7 +1568,8 @@ async function obtainPriceForAdjacentFlight(
         mainFlightDepTime,
         mainFlightArrTime,
         browser,
-        adjacentFlightLinks
+        adjacentFlightLinks,
+        homeAirport
       );
     } else {
       await lookForAdjacentReturnFlights(
@@ -1595,7 +1579,8 @@ async function obtainPriceForAdjacentFlight(
         mainFlightDepTime,
         mainFlightArrTime,
         browser,
-        adjacentFlightLinks
+        adjacentFlightLinks,
+        homeAirport
       );
     }
   }
@@ -1814,13 +1799,13 @@ async function obtainPriceForAdjacentFlight(
       flightInfoArr.length = 0;
       await page.goBack();
     } catch (error) {
-      console.log("An error occurred.", error);
+      console.log("\nAn error occurred.", error);
     }
   }
 
   if (flightPrice !== null) {
     console.log(
-      "Found a suitable price for one of the adjacent flight combinations."
+      "Found a suitable price for one of the adjacent flight combinations.\n"
     );
     return {
       flightPrice,
@@ -1830,17 +1815,18 @@ async function obtainPriceForAdjacentFlight(
       marginMs,
       flightType,
       connectAirport,
+      homeAirport,
     };
   } else {
     buttonsStartIndex = foundPricesButtons.length;
     flightInfoArr.length = 0;
     console.log("No prices have been found for the desired plane so far.");
-    console.log("Trying to fetch more prices...");
+    console.log("Trying to fetch more prices...\n");
 
     const showMoreButton = await page.$(".show-more-button");
 
     if (showMoreButton === null) {
-      console.log("No more prices available.");
+      console.log("No more prices available.\n");
       return null;
     } else {
       await showMoreButton.click();
@@ -1860,6 +1846,7 @@ async function obtainPriceForAdjacentFlight(
         false,
         airportRotation,
         adjacentFlightLinks,
+        homeAirport,
         startIndex,
         buttonsStartIndex
       );
@@ -1901,7 +1888,8 @@ function createAdjacentPriceObject(
     aircraft: string;
   }[],
   flightType: "depart" | "return",
-  connectAirport: string
+  connectAirport: string,
+  homeAirport: string
 ): AdjacentFlightPrice {
   return {
     date,
@@ -1910,6 +1898,7 @@ function createAdjacentPriceObject(
     flightInfo,
     flightType,
     connectAirport,
+    homeAirport,
   };
 }
 
@@ -1919,7 +1908,7 @@ async function acceptCookies(page: Page) {
     await page.click("div.P4zO-submit-buttons > button:nth-child(1)");
     console.log("Accepted all cookies.\n");
   } catch {
-    console.log("Cookies already accepted.");
+    console.log("Cookies already accepted.\n");
   }
 }
 
@@ -1967,61 +1956,103 @@ async function sendMail(to: string, subject: string, message: string) {
   }
 }
 
-function generateMainFlightTableRow(item: MainFlightPrice) {
+function generateMainFlightTable(item: MainFlightPrice) {
   return `
-        <tr>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
-              item.date
-            ).toLocaleDateString("sr")}</td>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
-              <span>${item.flightInfo.flightNumber}</span><br>
-              <span>${item.flightInfo.flightTime}</span><br>
-              <span>${item.flightInfo.flightRoute}</span><br>
-              <span>${item.flightInfo.aircraft}</span></td>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
-              item.price
-            }</td>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
-                <a href="${item.url}" target="_blank">${item.url}</a>
-            </td>
-        </tr>
+        <h1>Main flight:</h1>
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+              <tr style="background-color: #f2f2f2;">
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Flight info</th>
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
+              </tr>
+          </thead>
+          <tbody>
+            <tr>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
+                  item.date
+                ).toLocaleDateString("sr")}</td>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
+                  <span>${item.flightInfo.flightNumber}</span><br>
+                  <span>${item.flightInfo.flightTime}</span><br>
+                  <span>${item.flightInfo.flightRoute}</span><br>
+                  <span>${item.flightInfo.aircraft}</span></td>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
+                  item.price
+                }</td>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
+                    <a href="${item.url}" target="_blank">${item.url}</a>
+                </td>
+            </tr>
+          </tbody>
+        </table>
     `;
 }
 
-function generateAdjacentFlightTableRows(items: AdjacentFlightPrice[]) {
+function generateAdjacentFlightTables(
+  items: {
+    homeAirport: string;
+    adjacentPrices: AdjacentFlightPrice[];
+  }[]
+) {
   return items.map(
     (item) => `
-        <tr>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
-              item.date
-            ).toLocaleDateString("sr")}</td>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${item.flightInfo
-              .map(
-                (flightInfoObj) =>
-                  `<span>${flightInfoObj.flightNumber}</span><br>
-                 <span>${flightInfoObj.flightTime}</span><br>
-                 <span>${flightInfoObj.flightRoute}</span><br>
-                 <span>${flightInfoObj.aircraft}</span><br><br>`
-              )
-              .join("")}</td>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
-              item.price
-            }</td>
-            <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
-                <a href="${item.url}" target="_blank">${item.url}</a>
-            </td>
-        </tr>
+        <h1>${item.homeAirport} flights:</h1>
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+              <tr style="background-color: #f2f2f2;">
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Flight info</th>
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
+                  <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
+              </tr>
+          </thead>
+          <tbody>
+          ${item.adjacentPrices.map(
+            (adjacentPrice) =>
+              `<tr>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${new Date(
+                  adjacentPrice.date
+                ).toLocaleDateString("sr")}</td>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
+                  ${adjacentPrice.flightInfo
+                    .map(
+                      (flightInfo) =>
+                        `<p><span>${flightInfo.flightNumber}</span><br>
+                      <span>${flightInfo.flightTime}</span><br>
+                      <span>${flightInfo.flightRoute}</span><br>
+                      <span>${flightInfo.aircraft}</span></p>`
+                    )
+                    .join("")}
+                </td>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">${
+                  adjacentPrice.price
+                }</td>
+                <td style="border: 1px solid #dddddd; text-align: left; padding: 8px;">
+                    <a href="${adjacentPrice.url}" target="_blank">${
+                adjacentPrice.url
+              }</a>
+                </td>
+              </tr>`
+          )}
+          </tbody>
+        </table>
+        <br><br>
     `
   );
 }
 
 async function sendCheapestPriceCombinationEmail(
   mainPrice: MainFlightPrice,
-  adjacentPrices: AdjacentFlightPrice[],
+  adjacentPrices: {
+    homeAirport: string;
+    adjacentPrices: AdjacentFlightPrice[];
+  }[],
   totalPrice: number
 ) {
   console.log(
-    "Here's the cheapest flight combination found for this main rotation. Sending it to you mail right away!"
+    "Here's the cheapest flight combination found for this main rotation. Sending it to you mail right away!\n"
   );
 
   await sendMail(
@@ -2035,22 +2066,8 @@ async function sendCheapestPriceCombinationEmail(
           <body>
               <p>Hey there! This is the cheapest flights combination I was able to find for the main rotation. Check it out.</p>
               <h2>Price Overview</h2>
-              <table style="width: 100%; border-collapse: collapse;">
-                  <thead>
-                      <tr style="background-color: #f2f2f2;">
-                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Date</th>
-                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Flight info</th>
-                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Price (€)</th>
-                          <th style="border: 1px solid #dddddd; text-align: left; padding: 8px;">Link</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                      ${generateMainFlightTableRow(mainPrice)}
-                      ${generateAdjacentFlightTableRows(adjacentPrices).join(
-                        ""
-                      )}
-                  </tbody>
-              </table>
+              ${generateMainFlightTable(mainPrice)}
+              ${generateAdjacentFlightTables(adjacentPrices).join("")}
               <p>Total price (€): ${totalPrice}</p>
           </body>
         </html>`

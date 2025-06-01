@@ -24,6 +24,16 @@
     {
       "type": "node",
       "request": "launch",
+      "name": "Launch openTabsMultiOrigin",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/openTabsMultiOrigin.ts",
+      "preLaunchTask": "tsc: build - tsconfig.json", // Compiles TS before launch
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"], // Location of compiled JS files
+      "sourceMaps": true
+    },
+    {
+      "type": "node",
+      "request": "launch",
       "name": "Launch codesHelper",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/codesHelper.ts",

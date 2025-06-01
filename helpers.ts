@@ -218,3 +218,16 @@ export function parseDayFrag(
 
   return m;
 }
+
+export function findEarliestZone(zones: string[]): string {
+  let earliestTimeZone: string = "";
+
+  earliestTimeZone = zones.reduce((currentEarliest, zone) => {
+    const zoneOffset = moment().tz(zone).utcOffset();
+    const earliestOffset = moment().tz(currentEarliest).utcOffset();
+
+    return zoneOffset < earliestOffset ? zone : currentEarliest;
+  }, zones[0]);
+
+  return earliestTimeZone;
+}
