@@ -91,14 +91,6 @@ const cityCodesForMultipleAirports = {
 
 let wantedStartDateIso = "2025-09-20";
 
-const userAgent = new UserAgent({
-  deviceCategory: "desktop",
-});
-
-const userAgents = Array(100000)
-  .fill(undefined)
-  .map(() => userAgent.random());
-
 async function main() {
   try {
     const airportRotations: string[] = await loadData(
@@ -117,27 +109,18 @@ async function main() {
       airportRotation: string;
     }[] = [];
 
-    while (
-      new Date(wantedStartDateIso).getTime() < new Date("2026-01-01").getTime()
-    ) {
-      await prepareUrls(
-        airportRotations,
-        restrictedAirportCodes,
-        wantedStartDateIso,
-        urlsToOpen
-      );
+    await prepareUrls(
+      airportRotations,
+      restrictedAirportCodes,
+      wantedStartDateIso,
+      urlsToOpen
+    );
 
-      const browser = await launchBrowser(false);
+    const browser = await launchBrowser(false);
 
-      await lookForFlights(urlsToOpen, flights, browser);
+    await lookForFlights(urlsToOpen, flights, browser);
 
-      await browser.close();
-
-      const newWantedStartDate = new Date(wantedStartDateIso);
-      newWantedStartDate.setDate(newWantedStartDate.getDate() + 6);
-
-      wantedStartDateIso = newWantedStartDate.toISOString().substring(0, 10);
-    }
+    await browser.close();
   } catch (error) {
     console.error("An error occurred in the main function.", error);
   }
@@ -215,9 +198,6 @@ async function lookForFlights(
   startIndex: number = 0
 ) {
   let cheapestMainFlightPriceFound: number = Infinity;
-
-  const userAgent =
-    userAgents[Math.floor(Math.random() * userAgents.length)].toString();
 
   try {
     for (let i = 0; i < urlsToOpen.slice(startIndex).length; i++) {
