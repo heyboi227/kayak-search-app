@@ -455,6 +455,15 @@ async function lookForFlights(
 
       await acceptCookies(page);
 
+      await delay(10000);
+
+      while (page.url().endsWith("bestflight_a") || page.url() !== url) {
+        await page.close();
+        await delay(5000);
+        page = await openPage(browser, url);
+        await delay(10000);
+      }
+
       const firstSelector = page
         .waitForSelector(".c8MCw-header-text")
         .catch(() => null);
@@ -1051,13 +1060,16 @@ async function handleAdjacentPage(
   await delay(500);
   await acceptCookies(page);
 
-  if (SEARCH_TYPE === "CHEAPEST") {
-    while (page.url().endsWith("bestflight_a")) {
-      await page.close();
-      await delay(5000);
-      page = await openPage(browser, url);
-      await delay(10000);
-    }
+  await delay(10000);
+
+  while (
+    (SEARCH_TYPE === "CHEAPEST" && page.url().endsWith("bestflight_a")) ||
+    page.url() !== url
+  ) {
+    await page.close();
+    await delay(5000);
+    page = await openPage(browser, url);
+    await delay(10000);
   }
 
   const firstSelector = page
