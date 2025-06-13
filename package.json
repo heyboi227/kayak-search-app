@@ -6,8 +6,8 @@
     "lowdb": "^7.0.1",
     "moment-timezone": "^0.6.0",
     "nodemailer": "^7.0.3",
-    "puppeteer-core": "^24.10.0",
-    "user-agents": "^1.1.567"
+    "puppeteer-core": "^24.10.1",
+    "user-agents": "^1.1.568"
   },
   "name": "kayak-search",
   "version": "1.0.0",
