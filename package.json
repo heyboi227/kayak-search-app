@@ -7,7 +7,7 @@
     "moment-timezone": "^0.6.0",
     "nodemailer": "^7.0.3",
     "puppeteer-core": "^24.10.2",
-    "user-agents": "^1.1.582"
+    "user-agents": "^1.1.585"
   },
   "name": "kayak-search",
   "version": "1.0.0",
