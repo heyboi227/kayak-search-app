@@ -19,7 +19,7 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "@types/nodemailer": "^6.4.17",
+    "@types/nodemailer": "^7.0.0",
     "@types/user-agents": "^1.0.4"
   }
 }
