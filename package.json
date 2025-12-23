@@ -5,7 +5,7 @@
     "lodash": "^4.17.21",
     "lowdb": "^7.0.1",
     "moment-timezone": "^0.6.0",
-    "nodemailer": "^7.0.11",
+    "nodemailer": "^7.0.12",
     "puppeteer-core": "^24.34.0",
     "user-agents": "^1.1.669"
   },
