@@ -4,7 +4,7 @@
     "airport-timezone": "^1.1.1",
     "lodash": "^4.18.1",
     "lowdb": "^7.0.1",
-    "moment-timezone": "^0.6.2",
+    "moment-timezone": "^0.6.3",
     "nodemailer": "^9.0.3",
     "puppeteer-core": "^25.3.0",
     "user-agents": "^2.1.123"
